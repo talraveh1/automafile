@@ -1,0 +1,6 @@
+{
+    "explorer.fileNesting.patterns": {
+        "README.md": "*.md",
+        "config.jsonc": "*.json, *.jsonc, *.toml, CMake*.example, .gitignore, .gitattributes, .clangd, .clang-format, CMakeLists.txt"
+    }
+}

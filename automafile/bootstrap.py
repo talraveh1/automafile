@@ -1,0 +1,97 @@
+"""Memory template seeder + directory creation."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from automafile.config import REPO_ROOT, ensure_config_file, get_settings
+from automafile.log import get_logger
+
+
+log = get_logger(__name__)
+
+
+_POINTER = """\
+# Memory pointer
+
+This directory is the project-local memory for Automafile.
+
+- [preferences.md](preferences.md) — user-edited rules.
+- [taxonomy.md](taxonomy.md) — current categories and subcategories.
+- [corrections.jsonl](corrections.jsonl) — append-only log of `/triage` overrides.
+- [last-triage.json](last-triage.json) — single-line summary of the last triage run (overwritten each run).
+"""
+
+_PREFERENCES = """\
+# Preferences
+
+Edit these freely. The `/triage` skill reads them on every run.
+
+```yaml
+documents_root: C:\\Users\\trax7\\OneDrive\\Documents
+inbox_dir: Inbox
+keep_inbox_copy: false
+auto_apply: high_only
+new_category_threshold: 3
+prompt_on_drift: true
+naming_convention: "{date} - {correspondent} - {topic}.{ext}"
+```
+
+## Filing rules
+
+(Add free-form rules below; `/triage` will respect the durable ones.)
+"""
+
+_TAXONOMY = """\
+# Taxonomy
+
+Top-level categories. Add or remove freely; `/triage` will respect the file as the source of truth.
+
+- Financial
+- Legal
+- Research
+- Teaching
+- Personal
+- Media
+- Unknown
+
+## Subcategories
+
+(Empty by default. Add `Category/Subcategory` lines as the user's archive grows.)
+"""
+
+
+def bootstrap(*, force: bool = False) -> None:
+    """Idempotent: ensure config file, storage dirs, documents tree, memory templates."""
+    settings = get_settings()
+    repo_root = settings.repo_root
+
+    # config file (created from the example template if missing)
+    if ensure_config_file():
+        log.info("Wrote default config.jsonc from config.example.jsonc.")
+
+    # storage + build dirs
+    settings.scan_dir.mkdir(parents=True, exist_ok=True)
+    settings.logs_dir.mkdir(parents=True, exist_ok=True)
+    (repo_root / "build").mkdir(parents=True, exist_ok=True)
+
+    # documents tree (only the inbox; category folders appear on first filing)
+    settings.documents_root.mkdir(parents=True, exist_ok=True)
+    settings.inbox_path.mkdir(parents=True, exist_ok=True)
+
+    # memory dir
+    mem = repo_root / "memory"
+    mem.mkdir(parents=True, exist_ok=True)
+    _seed(mem / "pointer.md", _POINTER, force)
+    _seed(mem / "preferences.md", _PREFERENCES, force)
+    _seed(mem / "taxonomy.md", _TAXONOMY, force)
+    corrections = mem / "corrections.jsonl"
+    if force or not corrections.exists():
+        corrections.write_text("", encoding="utf-8")
+
+    log.info("Bootstrap complete: %s", repo_root)
+
+
+def _seed(path: Path, content: str, force: bool) -> None:
+    if force or not path.exists():
+        path.write_text(content, encoding="utf-8")

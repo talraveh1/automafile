@@ -1,0 +1,44 @@
+// Automafile runtime configuration.
+//
+// Copy this file to config.jsonc and adjust to your environment.
+// Environment variables (uppercase form of each key) override these values.
+
+{
+  // Ollama: a local LLM server reachable over HTTP.
+  "ollama_url": "http://localhost:11434",
+  "ollama_model": "aya-expanse:8b",
+
+  // The user's documents tree. The pipeline only reads/writes within this
+  // directory and the workspace folder; nothing else.
+  "documents_root": "C:\\Users\\<you>\\OneDrive\\Documents",
+
+  // The drop-zone subfolder inside documents_root. Filed documents end up at
+  // documents_root/<Category>[/<SubCategory>]/<smart-name>.<ext>.
+  "inbox_dir": "Inbox",
+
+  // The hidden subfolder name used for sidecar files (one per containing dir).
+  "meta_subfolder": ".meta",
+
+  // Tesseract OCR.
+  "tesseract_langs": "heb+eng",
+
+  // Empty = autodetect. Otherwise an absolute path to tesseract.exe.
+  "tesseract_bin": "",
+
+  // Empty = use the tesseract installation default. Otherwise the directory
+  // containing the *.traineddata files (used when language packs live outside
+  // the system tessdata directory).
+  "tessdata_prefix": "",
+
+  // Watcher behaviour.
+  "watch_settle_seconds": 2,
+  "watch_polling_interval": 5,
+
+  // Logging.
+  "log_level": "INFO",
+
+  // PDF OCR-decision thresholds.
+  "ocr_min_text_chars": 100,
+  "ocr_min_page_chars": 50,
+  "ocr_sparse_page_ratio": 0.3
+}

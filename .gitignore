@@ -1,0 +1,17 @@
+# venv
+.venv/
+__pycache__/
+*.pyc
+
+# local config + runtime
+config.jsonc
+storage/
+
+# Claude /triage memory (local-only learnings)
+memory/
+
+# OS
+Thumbs.db
+
+# build artifacts
+build/
