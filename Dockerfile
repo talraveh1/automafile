@@ -16,6 +16,16 @@ RUN apt-get update \
         poppler-utils \
         libmagic1 \
         git \
+        curl \
+        ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js + Claude Code CLI — used by the /triage skill from inside the container.
+# Sandboxed here on purpose: Claude only sees the bind-mounted /workspace and /docs.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g @anthropic-ai/claude-code \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
