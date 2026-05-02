@@ -1,24 +1,36 @@
 {
   "name": "automafile",
-  "build": {
-    "dockerfile": "../Dockerfile"
-  },
+  "dockerComposeFile": ["../compose.yml", "docker-compose.dev.yml"],
+  "service": "automafile",
   "workspaceFolder": "/workspace",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
-  "mounts": [
-    "source=${localEnv:AUTOMAFILE_DOCS:C:/Users/trax7/OneDrive/Documents},target=/docs,type=bind"
-  ],
-  "containerEnv": {
-    "DOCUMENTS_ROOT": "/docs",
-    "OLLAMA_URL": "http://host.docker.internal:11434"
-  },
-  "runArgs": ["--add-host=host.docker.internal:host-gateway"],
   "remoteUser": "automafile",
   "customizations": {
     "vscode": {
       "extensions": [
+        "alefragnani.bookmarks",
+        "anthropic.claude-code",
+        "bierner.markdown-mermaid",
+        "bpruitt-goddard.mermaid-markdown-syntax-highlighting",
+        "catbraaain.next-previous-method",
+        "catppuccin.catppuccin-vsc-icons",
+        "danielgjackson.auto-dark-mode-windows",
+        "darkriszty.markdown-table-prettify",
+        "frehu.fresh-file-explorer",
+        "github.vscode-pull-request-github",
+        "johnpapa.vscode-peacock",
+        "k--kato.intellij-idea-keybindings",
+        "ms-python.debugpy",
         "ms-python.python",
-        "ms-python.debugpy"
+        "ms-python.vscode-pylance",
+        "ms-python.vscode-python-envs",
+        "ms-vscode-remote.remote-containers",
+        "ms-vscode-remote.remote-wsl",
+        "ms-vscode.vscode-speech",
+        "openai.chatgpt",
+        "peterschmalfeldt.explorer-exclude",
+        "sdras.night-owl",
+        "slaugaus.open-with-system",
+        "streetsidesoftware.code-spell-checker"
       ]
     }
   }

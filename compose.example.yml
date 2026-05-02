@@ -21,6 +21,10 @@ services:
       # the user's documents tree — REPLACE the host path with yours
       - "C:/Users/<you>/OneDrive/Documents:/docs"
 
+      # host git identity (read-only) — REPLACE with your gitconfig path
+      # (drop this line if you don't want git inside the container to know who you are)
+      - "C:/Users/<you>/.gitconfig:/home/automafile/.gitconfig:ro"
+
     # makes Ollama on the host reachable from inside the container.
     # required on native-Linux Docker; redundant (no-op) on Docker Desktop and
     # Podman Desktop, which already inject host.docker.internal automatically.

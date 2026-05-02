@@ -123,6 +123,7 @@ def _build_prompt(text: str, hints: dict, taxonomy: list[str]) -> str:
 
 
 def _ollama_generate(prompt: str, *, extra_options: dict | None = None) -> str:
+    import time as _time
     settings = get_settings()
     url = settings.ollama_url.rstrip("/") + "/api/generate"
     options = {
@@ -139,10 +140,14 @@ def _ollama_generate(prompt: str, *, extra_options: dict | None = None) -> str:
         "format": "json",
         "options": options,
     }
+    log.debug("ollama POST %s model=%s prompt=%dchars", url, settings.ollama_model, len(prompt))
+    started = _time.perf_counter()
     resp = requests.post(url, json=body, timeout=300)
     resp.raise_for_status()
     data = resp.json()
-    return data.get("response", "")
+    raw = data.get("response", "")
+    log.debug("ollama response: %d chars in %dms", len(raw), int((_time.perf_counter() - started) * 1000))
+    return raw
 
 
 def _strict_parse(raw: str) -> dict | None:
@@ -261,29 +266,36 @@ def parse_with_tiers(raw: str, prompt_for_retry: str | None = None) -> Enrichmen
     """Pure parsing pipeline. Used by tests and by ``enrich``."""
     parsed = _strict_parse(raw)
     if parsed is not None:
+        log.debug("llm parse tier=strict")
         return _coerce_to_result(parsed, "strict", raw)
 
     parsed = _repair_parse(raw)
     if parsed is not None:
+        log.debug("llm parse tier=repair")
         return _coerce_to_result(parsed, "repair", raw)
 
     if prompt_for_retry:
+        log.info("llm strict+repair failed; retrying with reminder")
         retry_prompt = prompt_for_retry + "\n\nReminder: do NOT use double-quote characters inside string values."
         try:
             retry_raw = _ollama_generate(retry_prompt)
             parsed = _strict_parse(retry_raw) or _repair_parse(retry_raw)
             if parsed is not None:
+                log.debug("llm parse tier=retry")
                 return _coerce_to_result(parsed, "retry", retry_raw)
             partial = _regex_recover(retry_raw)
             if partial:
+                log.debug("llm parse tier=regex (after retry)")
                 return _coerce_to_result(partial, "regex", retry_raw)
         except Exception as exc:  # noqa: BLE001
             log.warning("LLM retry failed: %s", exc)
 
     partial = _regex_recover(raw)
     if partial:
+        log.warning("llm parse tier=regex (degraded recovery, raw=%d chars)", len(raw))
         return _coerce_to_result(partial, "regex", raw)
 
+    log.error("llm parse failed entirely; returning placeholder (raw=%d chars)", len(raw))
     return _placeholder_result(raw)
 
 
@@ -291,12 +303,18 @@ def enrich(text: str, hints: dict | None = None, taxonomy: list[str] | None = No
     """Send text to Ollama, parse with tiered fallback, return enrichment."""
     taxonomy = taxonomy or ["Financial", "Legal", "Research", "Teaching", "Personal", "Media", "Unknown"]
     prompt = _build_prompt(text, hints or {}, taxonomy)
+    log.info("enrich: text=%dchars hints=%s", len(text or ""), sorted((hints or {}).keys()) or "[]")
     try:
         raw = _ollama_generate(prompt)
     except Exception as exc:  # noqa: BLE001
         log.error("Ollama call failed: %s", exc)
         return _placeholder_result(f"<<error>> {exc}")
-    return parse_with_tiers(raw, prompt_for_retry=prompt)
+    result = parse_with_tiers(raw, prompt_for_retry=prompt)
+    log.info(
+        "enrich done: tier=%s category=%s confidence=%s tags=%d needs_review=%s",
+        result.tier, result.category, result.confidence, len(result.tags), result.needs_review,
+    )
+    return result
 
 
 def ollama_available() -> bool:

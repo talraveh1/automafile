@@ -16,6 +16,10 @@ from automafile.extractors import (
     xlsx as xlsx_ext,
 )
 from automafile.extractors.base import ExtractedDoc
+from automafile.log import get_logger
+
+
+log = get_logger(__name__)
 
 
 EXT_MAP = {
@@ -80,10 +84,15 @@ def _sniff_mime(path: Path) -> str | None:
 def get_extractor(path: Path):
     ext = path.suffix.lower()
     if ext in EXT_MAP:
-        return EXT_MAP[ext]
+        mod = EXT_MAP[ext]
+        log.debug("extractor for %s: %s (by extension)", path.name, mod.__name__)
+        return mod
     mime = _sniff_mime(path)
     if mime and mime in MIME_MAP:
-        return MIME_MAP[mime]
+        mod = MIME_MAP[mime]
+        log.debug("extractor for %s: %s (by mime %s)", path.name, mod.__name__, mime)
+        return mod
+    log.debug("extractor for %s: unknown (ext=%s mime=%s)", path.name, ext, mime)
     return unknown_ext
 
 

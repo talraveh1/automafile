@@ -43,6 +43,7 @@ def supports(file_path: Path) -> bool:
 def write(file_path: Path, fields: dict[str, Any]) -> None:
     """Write metadata into the file in place. Raises ``NativeMetadataError`` on failure."""
     suffix = file_path.suffix.lower()
+    log.debug("native write: %s (%s)", file_path.name, suffix)
     try:
         with preserve_times(file_path):
             if suffix == ".pdf":

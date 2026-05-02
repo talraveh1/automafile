@@ -10,13 +10,14 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path, monkeypatch):
-    """Each test gets its own DOCUMENTS_ROOT and fresh settings cache."""
+    """Each test gets its own DOCUMENTS_ROOT, STORAGE_DIR, and fresh settings cache."""
     docs_root = tmp_path / "docs"
     docs_root.mkdir()
     (docs_root / "Inbox").mkdir()
     monkeypatch.setenv("DOCUMENTS_ROOT", str(docs_root))
     monkeypatch.setenv("INBOX_DIR", "Inbox")
     monkeypatch.setenv("LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage"))
     from automafile.config import reset_settings
     reset_settings()
     yield docs_root

@@ -169,6 +169,7 @@ def write(
     tmp = spath.with_suffix(spath.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, spath)
+    log.debug("sidecar written: %s", spath)
     return spath
 
 
@@ -216,3 +217,4 @@ def update_relative_path(file_path: Path, new_path: Path) -> None:
     write(new_path, doc, summary, notes)
     if old_sidecar != new_sidecar and old_sidecar.exists():
         old_sidecar.unlink()
+        log.debug("sidecar moved: %s -> %s", old_sidecar, new_sidecar)

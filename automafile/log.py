@@ -26,13 +26,21 @@ def setup_logging(level: str | None = None) -> None:
             datefmt="%Y-%m-%d %H:%M:%S",
         )
     )
-    handler_file = logging.FileHandler(
-        settings.logs_dir / "automafile.log",
-        encoding="utf-8",
-    )
-    handler_file.setFormatter(handler_console.formatter)
+    handlers: list[logging.Handler] = [handler_console]
+    try:
+        handler_file = logging.FileHandler(
+            settings.logs_dir / "automafile.log",
+            encoding="utf-8",
+        )
+        handler_file.setFormatter(handler_console.formatter)
+        handlers.append(handler_file)
+    except OSError as exc:
+        handler_console.handle(logging.LogRecord(
+            name=__name__, level=logging.WARNING, pathname=__file__, lineno=0,
+            msg="File logging disabled: %s", args=(exc,), exc_info=None,
+        ))
     root = logging.getLogger()
-    root.handlers = [handler_console, handler_file]
+    root.handlers = handlers
     root.setLevel(log_level)
     _configured = True
 

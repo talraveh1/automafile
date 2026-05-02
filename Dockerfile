@@ -7,6 +7,7 @@ FROM python:3.12-slim
 #   tesseract-ocr + heb/eng — OCR engine and language packs
 #   poppler-utils           — pdf2image (PDF rasterization for OCR)
 #   libmagic1               — python-magic (MIME sniffing for unknown extensions)
+#   git                     — for working with the bind-mounted workspace repo
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
@@ -14,6 +15,7 @@ RUN apt-get update \
         tesseract-ocr-heb \
         poppler-utils \
         libmagic1 \
+        git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -21,7 +23,9 @@ RUN apt-get update \
 ARG UID=1000
 ARG GID=1000
 RUN groupadd -g ${GID} automafile \
-    && useradd -m -u ${UID} -g ${GID} -s /bin/bash automafile
+    && useradd -m -u ${UID} -g ${GID} -s /bin/bash automafile \
+    && mkdir -p /home/automafile/.vscode-server \
+    && chown -R automafile:automafile /home/automafile/.vscode-server
 
 WORKDIR /workspace
 

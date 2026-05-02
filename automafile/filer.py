@@ -102,6 +102,7 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
 
     target = target_path_for(proposal)
     target.parent.mkdir(parents=True, exist_ok=True)
+    log.info("filing %s -> %s", path, target)
 
     if target.exists() and target.resolve() != path.resolve():
         # the outer guard already established the two paths differ; if hashes match
@@ -109,11 +110,14 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
         existing_hash = hash_file(target)
         new_hash = hash_file(path)
         if existing_hash == new_hash:
+            log.info("idempotent re-file: target hash matches; removing source %s", path)
             path.unlink()
             _post_move_metadata(target, proposal)
             return target
         if not overwrite:
+            log.warning("collision: %s exists with different content (overwrite=False)", target)
             raise TargetCollision(f"{target} already exists with different content")
+        log.warning("overwriting %s with %s", target, path)
 
     shutil.move(str(path), str(target))
     sidecar_old = sidecar_path_for(path)
@@ -121,6 +125,7 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
         update_relative_path(path, target)
 
     _post_move_metadata(target, proposal)
+    log.info("filed: %s", target)
     return target
 
 

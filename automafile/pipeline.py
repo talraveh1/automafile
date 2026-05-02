@@ -94,10 +94,12 @@ def _hints_for(doc: ExtractedDoc) -> dict:
 def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -> ProcessResult:
     started = time.perf_counter()
     result = ProcessResult(path=path)
+    log.info("processing %s%s", path, " (dry-run)" if dry_run else "")
 
     if not path.exists() or not path.is_file():
         result.error = "missing_or_not_file"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
+        log.error("cannot process %s: %s", path, result.error)
         return result
 
     try:
@@ -105,18 +107,23 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
     except EncryptedDocumentError as exc:
         result.error = f"encrypted: {exc}"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
+        log.error("encrypted document %s: %s", path, exc)
         return result
     except ExtractorError as exc:
         result.error = f"extract_failed: {exc}"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
+        log.error("extraction failed for %s: %s", path, exc)
         return result
+    log.debug("extracted %s: format=%s text=%dchars", path, doc.format, len(doc.text or ""))
 
     decision = _decide_ocr(doc)
     if force_ocr and decision.action == "no_ocr":
         decision = OcrDecision(action="ocr_full", reason="forced")
     result.ocr_decision = decision.action
+    log.debug("ocr decision for %s: %s (%s)", path, decision.action, decision.reason or "-")
     doc, ocr_block = _maybe_run_ocr(doc, decision)
 
+    log.debug("enriching %s (%d chars)", path, len(doc.text or ""))
     enrichment = enrich(doc.text, _hints_for(doc))
     result.enrichment = enrichment
     result.llm_tier = enrichment.tier
@@ -127,6 +134,10 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
     if dry_run:
         result.metadata_target = "dry_run"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
+        log.info(
+            "processed %s | ocr=%s tier=%s category=%s target=dry_run | %dms",
+            path, result.ocr_decision, result.llm_tier, result.category, result.duration_ms,
+        )
         return result
 
     wrote_native = False
@@ -154,6 +165,11 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         result.metadata_target = "native+sidecar"
 
     result.duration_ms = int((time.perf_counter() - started) * 1000)
+    log.info(
+        "processed %s | ocr=%s tier=%s category=%s target=%s | %dms",
+        path, result.ocr_decision, result.llm_tier, result.category,
+        result.metadata_target, result.duration_ms,
+    )
     return result
 
 

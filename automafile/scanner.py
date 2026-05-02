@@ -119,17 +119,29 @@ def _ocr_config_drift(doc, current_engine: str, current_langs: str) -> bool:
     return (prev_engine != current_engine) or (prev_langs != current_langs)
 
 
-def run_scan(documents_root: Path | None = None) -> Worklist:
+def run_scan(documents_root: Path | None = None, subpath: Path | None = None) -> Worklist:
     settings = get_settings()
     root = documents_root or settings.documents_root
     if not root.exists():
         root.mkdir(parents=True, exist_ok=True)
 
+    if subpath is not None:
+        if subpath.is_absolute():
+            raise ValueError(f"subpath must be relative: {subpath}")
+        walk_root = (root / subpath).resolve()
+        if not walk_root.is_relative_to(root.resolve()):
+            raise ValueError(f"subpath escapes documents_root: {subpath}")
+        if not walk_root.exists():
+            raise FileNotFoundError(f"subpath does not exist: {walk_root}")
+    else:
+        walk_root = root
+
+    log.info("scan starting under %s", walk_root)
     wl = Worklist(ran_at=_utc_now_iso(), documents_root=str(root))
     current_engine = tesseract_version()
     current_langs = settings.tesseract_langs
 
-    for path in root.rglob("*"):
+    for path in walk_root.rglob("*"):
         if not path.is_file():
             continue
         # any dot-prefixed path component (covers .meta/ and any other hidden dirs)
@@ -208,7 +220,7 @@ def run_scan(documents_root: Path | None = None) -> Worklist:
                 })
 
     # orphans
-    for orphan in find_orphans(root):
+    for orphan in find_orphans(walk_root):
         wl.orphan_sidecars.append({
             "sidecar_relative_path": str(orphan.sidecar_path.relative_to(root)).replace("\\", "/"),
             "missing_path": orphan.described_relative_path,
@@ -218,7 +230,7 @@ def run_scan(documents_root: Path | None = None) -> Worklist:
 
     # quarantined sidecars (corrupt files moved aside by sidecar.read)
     meta_name = settings.meta_subfolder
-    for path in root.rglob(f"{meta_name}/*.broken-*"):
+    for path in walk_root.rglob(f"{meta_name}/*.broken-*"):
         if not path.is_file():
             continue
         # the original sidecar name had ``.broken-<ts>`` appended; strip that
@@ -232,6 +244,15 @@ def run_scan(documents_root: Path | None = None) -> Worklist:
             "original_filename": original_sidecar_name,
         })
 
+    log.info(
+        "scan complete under %s: seen=%d skipped=%d need_ocr=%d need_meta=%d "
+        "partial=%d stale=%d ocr_review=%d orphans=%d quarantined=%d unprocessable=%d",
+        walk_root, wl.files_seen, wl.skipped,
+        len(wl.files_needing_ocr), len(wl.files_needing_metadata),
+        len(wl.files_with_partial_metadata), len(wl.files_with_stale_metadata),
+        len(wl.ocr_review_candidates), len(wl.orphan_sidecars),
+        len(wl.quarantined_sidecars), len(wl.unprocessable_files),
+    )
     return wl
 
 
@@ -260,10 +281,65 @@ def _has_native_metadata(path: Path) -> bool:
     return False
 
 
-def write_worklist(wl: Worklist) -> Path:
+_BUCKET_KEYS: dict[str, str] = {
+    "files_needing_ocr": "relative_path",
+    "files_needing_metadata": "relative_path",
+    "files_with_partial_metadata": "relative_path",
+    "files_with_stale_metadata": "relative_path",
+    "ocr_review_candidates": "relative_path",
+    "unprocessable_files": "relative_path",
+    "orphan_sidecars": "sidecar_relative_path",
+    "quarantined_sidecars": "quarantine_relative_path",
+}
+
+
+def _already_queued(scan_dir: Path, documents_root: str) -> dict[str, set[str]]:
+    """For each bucket, ids that already appear in a worklist for ``documents_root``."""
+    queued: dict[str, set[str]] = {b: set() for b in _BUCKET_KEYS}
+    if not scan_dir.exists():
+        return queued
+    for cand in scan_dir.glob("scan-*.json"):
+        try:
+            data = json.loads(cand.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if data.get("documents_root") != documents_root:
+            continue
+        for bucket, key in _BUCKET_KEYS.items():
+            for entry in data.get(bucket, []):
+                ident = entry.get(key)
+                if ident:
+                    queued[bucket].add(ident)
+    return queued
+
+
+def write_worklist(wl: Worklist) -> Path | None:
     settings = get_settings()
     settings.scan_dir.mkdir(parents=True, exist_ok=True)
+
+    queued = _already_queued(settings.scan_dir, wl.documents_root)
+    dropped = 0
+    for bucket, key in _BUCKET_KEYS.items():
+        existing = queued[bucket]
+        if not existing:
+            continue
+        bucket_list = getattr(wl, bucket)
+        before = len(bucket_list)
+        bucket_list[:] = [e for e in bucket_list if e.get(key) not in existing]
+        dropped += before - len(bucket_list)
+    if dropped:
+        log.info("scan: dropped %d entry(ies) already queued in existing worklist(s)", dropped)
+
+    if not any(getattr(wl, bucket) for bucket in _BUCKET_KEYS):
+        log.info("scan: nothing new to write — every entry is already queued")
+        return None
+
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     out = settings.scan_dir / f"scan-{ts}.json"
+    bump = 0
+    while out.exists():
+        bump += 1
+        out = settings.scan_dir / f"scan-{ts}-{bump}.json"
     out.write_text(json.dumps(wl.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
+    log.info("worklist written: %s", out)
     return out

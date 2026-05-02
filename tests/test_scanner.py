@@ -33,6 +33,33 @@ def test_run_scan_writes_worklist_file(docs_root):
     assert out.read_text(encoding="utf-8").startswith("{")
 
 
+def test_write_worklist_skips_when_everything_already_queued(docs_root):
+    p = docs_root / "Inbox" / "note.txt"
+    p.write_text("hello", encoding="utf-8")
+    first = write_worklist(run_scan())
+    assert first is not None and first.exists()
+
+    second = write_worklist(run_scan())
+    assert second is None, "second scan with no new files should not write a worklist"
+
+
+def test_write_worklist_writes_only_new_entries(docs_root):
+    a = docs_root / "Inbox" / "a.txt"
+    a.write_text("a", encoding="utf-8")
+    first = write_worklist(run_scan())
+    assert first is not None
+
+    b = docs_root / "Inbox" / "b.txt"
+    b.write_text("b", encoding="utf-8")
+    second = write_worklist(run_scan())
+    assert second is not None and second != first
+    import json as _json
+    data = _json.loads(second.read_text(encoding="utf-8"))
+    rels = [e["relative_path"] for e in data["files_needing_metadata"]]
+    assert any(r.endswith("b.txt") for r in rels)
+    assert not any(r.endswith("a.txt") for r in rels), "a.txt was already queued in the first worklist"
+
+
 def test_partial_metadata_detected(docs_root):
     p = docs_root / "Inbox" / "doc.txt"
     p.write_text("hi", encoding="utf-8")

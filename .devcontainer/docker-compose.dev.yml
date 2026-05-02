@@ -1,0 +1,19 @@
+# Override applied by VS Code Dev Containers on top of ../compose.yml.
+# Swaps PID 1 to a no-op so VS Code can attach. Run the app yourself from
+# a VS Code terminal, e.g. `automafile watch`.
+
+services:
+  automafile:
+    command: ["sleep", "infinity"]
+    restart: "no"
+    volumes:
+      - "C:/Users/trax7/.claude:/home/automafile/.claude"
+      - "C:/Users/trax7/.claude.json:/home/automafile/.claude.json"
+      - "C:/Users/trax7/.codex:/home/automafile/.codex"
+      - "C:/Users/trax7/.gemini:/home/automafile/.gemini"
+      - "C:/Users/trax7/.copilot:/home/automafile/.copilot"
+      # persist VS Code Server across container recreations so reattach is fast
+      - vscode-server:/home/automafile/.vscode-server
+
+volumes:
+  vscode-server:

@@ -139,13 +139,17 @@ def pdf_ocr_decision(path: Path, per_page_chars: list[int] | None = None) -> Ocr
 
     total = sum(per_page_chars)
     if total < settings.ocr_min_text_chars:
+        log.debug("pdf_ocr_decision %s: ocr_full (no_text_layer; %d total chars)", path.name, total)
         return OcrDecision(action="ocr_full", reason="no_text_layer")
 
     sparse = [i for i, c in enumerate(per_page_chars) if c < settings.ocr_min_page_chars]
     if not sparse:
+        log.debug("pdf_ocr_decision %s: no_ocr (%d pages, %d chars)", path.name, len(per_page_chars), total)
         return OcrDecision(action="no_ocr")
     if len(sparse) <= max(1, int(len(per_page_chars) * settings.ocr_sparse_page_ratio)):
+        log.debug("pdf_ocr_decision %s: ocr_pages (%d sparse of %d)", path.name, len(sparse), len(per_page_chars))
         return OcrDecision(action="ocr_pages", pages=sparse, reason="sparse_pages")
+    log.debug("pdf_ocr_decision %s: ocr_full (majority sparse, %d/%d)", path.name, len(sparse), len(per_page_chars))
     return OcrDecision(action="ocr_full", reason="majority_sparse")
 
 
@@ -170,6 +174,7 @@ def _coalesce_page_ranges(zero_based_pages: list[int]) -> list[tuple[int, int]]:
 
 def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None) -> str:
     """Run OCR on an image or PDF and return concatenated text."""
+    import time as _time
     settings = get_settings()
     langs = langs or settings.tesseract_langs
     bin_path = _configure_pytesseract()
@@ -180,6 +185,8 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
 
     suffix = path.suffix.lower()
     image_exts = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif"}
+    started = _time.perf_counter()
+    log.info("ocr starting: %s (langs=%s%s)", path.name, langs, f", pages={pages}" if pages else "")
     if suffix in image_exts:
         try:
             import pillow_heif
@@ -188,7 +195,9 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
             pass
         from PIL import Image
         with Image.open(path) as im:
-            return pytesseract.image_to_string(im, lang=langs)
+            text = pytesseract.image_to_string(im, lang=langs)
+        log.info("ocr done: %s -> %d chars in %dms", path.name, len(text), int((_time.perf_counter() - started) * 1000))
+        return text
 
     if suffix == ".pdf":
         try:
@@ -200,6 +209,7 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
             # once per run of pages instead of once per page
             chunks: list[str] = []
             for first_one_based, last_one_based in _coalesce_page_ranges(pages):
+                log.debug("ocr pdf range %s: pages %d-%d", path.name, first_one_based, last_one_based)
                 imgs = convert_from_path(
                     str(path),
                     dpi=200,
@@ -208,9 +218,14 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
                 )
                 for img in imgs:
                     chunks.append(pytesseract.image_to_string(img, lang=langs))
-            return "\n".join(chunks)
+            text = "\n".join(chunks)
+            log.info("ocr done: %s -> %d chars in %dms (%d page range(s))", path.name, len(text), int((_time.perf_counter() - started) * 1000), len(_coalesce_page_ranges(pages)))
+            return text
         imgs = convert_from_path(str(path), dpi=200)
-        return "\n".join(pytesseract.image_to_string(img, lang=langs) for img in imgs)
+        log.debug("ocr pdf full %s: %d pages rendered", path.name, len(imgs))
+        text = "\n".join(pytesseract.image_to_string(img, lang=langs) for img in imgs)
+        log.info("ocr done: %s -> %d chars in %dms (%d pages)", path.name, len(text), int((_time.perf_counter() - started) * 1000), len(imgs))
+        return text
 
     raise ValueError(f"Unsupported file type for OCR: {suffix}")
 

@@ -87,9 +87,9 @@ class Settings(BaseModel):
     ocr_min_page_chars: int = 50
     ocr_sparse_page_ratio: float = 0.3
 
-    storage_dir: Path = Field(default_factory=lambda: REPO_ROOT / "storage")
-    scan_dir: Path = Field(default_factory=lambda: REPO_ROOT / "storage" / "scan")
-    logs_dir: Path = Field(default_factory=lambda: REPO_ROOT / "storage" / "logs")
+    storage_dir: Path
+    scan_dir: Path
+    logs_dir: Path
     repo_root: Path = REPO_ROOT
 
     model_config = {"arbitrary_types_allowed": True, "frozen": True}
@@ -121,6 +121,10 @@ def get_settings() -> Settings:
         "ocr_min_text_chars": 100,
         "ocr_min_page_chars": 50,
         "ocr_sparse_page_ratio": 0.3,
+        "storage_dir": str(REPO_ROOT / "storage"),
+        # empty = derive from storage_dir
+        "scan_dir": "",
+        "logs_dir": "",
     }
 
     resolved: dict[str, Any] = {}
@@ -134,7 +138,18 @@ def get_settings() -> Settings:
             resolved[key] = default
 
     documents_root = Path(str(resolved.pop("documents_root"))).expanduser().resolve()
-    return Settings(documents_root=documents_root, **resolved)
+    storage_dir = Path(str(resolved.pop("storage_dir"))).expanduser().resolve()
+    scan_raw = resolved.pop("scan_dir")
+    logs_raw = resolved.pop("logs_dir")
+    scan_dir = Path(str(scan_raw)).expanduser().resolve() if scan_raw else storage_dir / "scan"
+    logs_dir = Path(str(logs_raw)).expanduser().resolve() if logs_raw else storage_dir / "logs"
+    return Settings(
+        documents_root=documents_root,
+        storage_dir=storage_dir,
+        scan_dir=scan_dir,
+        logs_dir=logs_dir,
+        **resolved,
+    )
 
 
 def reset_settings() -> None:

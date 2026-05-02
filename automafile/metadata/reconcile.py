@@ -69,6 +69,8 @@ def build_hash_index(root: Path) -> dict[str, list[Path]]:
     cache = _load_cache(settings.scan_dir)
     new_cache: dict[str, dict] = {}
     index: dict[str, list[Path]] = {}
+    hashed = 0
+    cached_hits = 0
     for f in iter_files(root):
         try:
             st = f.stat()
@@ -78,14 +80,17 @@ def build_hash_index(root: Path) -> dict[str, list[Path]]:
         cached = cache.get(key)
         if cached and cached.get("mtime_ns") == st.st_mtime_ns and cached.get("size") == st.st_size:
             h = cached["hash"]
+            cached_hits += 1
         else:
             try:
                 h = hash_file(f)
+                hashed += 1
             except Exception:
                 continue
         new_cache[key] = {"mtime_ns": st.st_mtime_ns, "size": st.st_size, "hash": h}
         index.setdefault(h, []).append(f)
     _save_cache(settings.scan_dir, new_cache)
+    log.debug("hash index built under %s: %d files (%d hashed, %d cache hits)", root, hashed + cached_hits, hashed, cached_hits)
     return index
 
 
@@ -112,4 +117,8 @@ def find_orphans(root: Path) -> list[OrphanReport]:
             sidecar_hash=h,
             matches_in_tree=list(matches),
         ))
+    if orphans:
+        log.info("find_orphans under %s: %d orphan sidecar(s)", root, len(orphans))
+    else:
+        log.debug("find_orphans under %s: no orphans", root)
     return orphans
