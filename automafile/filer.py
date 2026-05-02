@@ -104,17 +104,14 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if target.exists() and target.resolve() != path.resolve():
-        try:
-            existing_hash = hash_file(target)
-            new_hash = hash_file(path)
-            if existing_hash == new_hash:
-                # idempotent: same file already filed; remove the duplicate at source
-                if path.resolve() != target.resolve():
-                    path.unlink()
-                _post_move_metadata(target, proposal)
-                return target
-        except Exception:
-            pass
+        # the outer guard already established the two paths differ; if hashes match
+        # we treat it as an idempotent re-file, otherwise it's a true collision
+        existing_hash = hash_file(target)
+        new_hash = hash_file(path)
+        if existing_hash == new_hash:
+            path.unlink()
+            _post_move_metadata(target, proposal)
+            return target
         if not overwrite:
             raise TargetCollision(f"{target} already exists with different content")
 
