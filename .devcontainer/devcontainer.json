@@ -6,6 +6,9 @@
   "remoteUser": "automafile",
   "customizations": {
     "vscode": {
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python"
+      },
       "extensions": [
         "alefragnani.bookmarks",
         "anthropic.claude-code",

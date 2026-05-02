@@ -2,5 +2,6 @@
     "explorer.fileNesting.patterns": {
         "README.md": "*.md",
         "config.jsonc": "*.json, *.jsonc, *.toml, *.yml, CMake*.example, .gitignore, .gitattributes, .dockerignore, Dockerfile, .clangd, .clang-format, CMakeLists.txt"
-    }
+    },
+    "terminal.integrated.environmentChangesRelaunch": false
 }
