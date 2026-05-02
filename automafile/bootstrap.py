@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.config import REPO_ROOT, ensure_config_file, get_settings
+from automafile.config import REPO_ROOT, ensure_config_file, get_settings, reset_settings
 from automafile.log import get_logger
 
 
@@ -63,12 +63,15 @@ Top-level categories. Add or remove freely; `/triage` will respect the file as t
 
 def bootstrap(*, force: bool = False) -> None:
     """Idempotent: ensure config file, storage dirs, documents tree, memory templates."""
-    settings = get_settings()
-    repo_root = settings.repo_root
-
-    # config file (created from the example template if missing)
+    # write the config file BEFORE loading settings, so the cached Settings
+    # reflect what's actually on disk (matters on a fresh clone where the
+    # example template differs from the in-code defaults)
     if ensure_config_file():
         log.info("Wrote default config.jsonc from config.example.jsonc.")
+        reset_settings()
+
+    settings = get_settings()
+    repo_root = settings.repo_root
 
     # storage + build dirs
     settings.scan_dir.mkdir(parents=True, exist_ok=True)
