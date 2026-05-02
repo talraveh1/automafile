@@ -6,6 +6,7 @@ import ctypes
 import os
 import platform
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,9 @@ log = get_logger(__name__)
 
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
+# matches the rename suffix produced by ``_quarantine`` so callers / scanner
+# can identify quarantined files (e.g. ``foo.txt.md.broken-20260502-074512``)
+QUARANTINE_SUFFIX_RE = re.compile(r"\.broken-\d{8}-\d{6}$")
 
 
 def sidecar_path_for(file_path: Path) -> Path:
@@ -81,27 +85,59 @@ def _split_body(existing: str) -> tuple[str, str]:
 
 
 def read(file_path: Path) -> tuple[MetadataDoc | None, str, str]:
-    """Return ``(metadata_doc | None, summary_body, notes_body)``."""
+    """Return ``(metadata_doc | None, summary_body, notes_body)``.
+
+    A genuinely-missing sidecar returns ``(None, "", "")`` — the fast path.
+    A sidecar that exists but cannot be parsed is **renamed aside**
+    (``<name>.broken-<ts>``) so the next write doesn't silently clobber
+    user edits, an ERROR is logged, and a notification fires; the function
+    still returns ``(None, "", "")`` so callers continue. Once quarantined,
+    subsequent calls hit the missing path naturally.
+    """
     spath = sidecar_path_for(file_path)
     if not spath.exists():
         return None, "", ""
     raw = spath.read_text(encoding="utf-8")
     match = FRONTMATTER_RE.match(raw)
     if not match:
+        _quarantine(spath, "no_frontmatter")
         return None, "", ""
     front_text, body = match.group(1), match.group(2)
     try:
         data = yaml.safe_load(front_text) or {}
     except yaml.YAMLError as exc:
-        log.warning("Sidecar %s has invalid YAML: %s", spath, exc)
+        _quarantine(spath, f"yaml_error: {exc}")
         return None, "", ""
     try:
         doc = MetadataDoc(**data)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Sidecar %s does not match schema: %s", spath, exc)
+        _quarantine(spath, f"schema_error: {exc}")
         return None, "", ""
     summary, notes = _split_body(body)
     return doc, summary, notes
+
+
+def _quarantine(spath: Path, reason: str) -> None:
+    """Rename a corrupt sidecar aside so the next write preserves user data."""
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    backup = spath.with_name(f"{spath.name}.broken-{ts}")
+    log.error("Sidecar %s corrupt (%s); moving aside to %s", spath, reason, backup.name)
+    try:
+        spath.rename(backup)
+    except OSError as exc:
+        log.error("Could not quarantine %s: %s", spath, exc)
+        return
+    # best-effort notification — lazy import to avoid spinning up the toaster
+    # on cold paths and to dodge import cycles
+    try:
+        from automafile.notifier import notify
+        notify("Sidecar quarantined", f"{spath.parent.parent.name}/{spath.name} ({reason})")
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Notification failed for quarantine: %s", exc)
+
+
+def is_quarantined(name: str) -> bool:
+    return bool(QUARANTINE_SUFFIX_RE.search(name))
 
 
 def write(

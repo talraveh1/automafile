@@ -32,9 +32,8 @@ def iter_files(root: Path):
     for path in root.rglob("*"):
         if not path.is_file():
             continue
+        # any dot-prefixed component (covers .meta/ and any other hidden dirs)
         if any(part.startswith(".") for part in path.relative_to(root).parts):
-            continue
-        if path.suffix.lower() == ".md" and path.parent.name == get_settings().meta_subfolder:
             continue
         yield path
 

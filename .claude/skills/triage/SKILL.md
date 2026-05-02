@@ -29,6 +29,17 @@ exactly one candidate is present. If multiple candidates, ask the user via
 --yes-all` (single-match) or by editing the sidecar's `relative_path` field
 manually for multi-match cases.
 
+## Quarantine review
+
+For each entry in `quarantined_sidecars` (corrupt sidecars that were moved
+aside during a previous read), ask the user via `AskUserQuestion`:
+
+- **Restore**: rename the `.broken-<ts>` file back to its original name; the
+  user fixes it manually before the next run.
+- **Discard**: delete the broken file. The next pipeline run regenerates
+  fresh metadata.
+- **Skip**: leave it; will resurface on the next scan.
+
 ## Build the queue
 
 Files in `<INBOX_DIR>` (read directly) AND files flagged in the scan worklist

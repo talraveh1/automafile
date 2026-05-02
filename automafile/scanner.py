@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,7 @@ class Worklist:
     files_with_stale_metadata: list[dict] = field(default_factory=list)
     ocr_review_candidates: list[dict] = field(default_factory=list)
     orphan_sidecars: list[dict] = field(default_factory=list)
+    quarantined_sidecars: list[dict] = field(default_factory=list)
     unprocessable_files: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -61,6 +63,7 @@ class Worklist:
             "files_with_stale_metadata": self.files_with_stale_metadata,
             "ocr_review_candidates": self.ocr_review_candidates,
             "orphan_sidecars": self.orphan_sidecars,
+            "quarantined_sidecars": self.quarantined_sidecars,
             "unprocessable_files": self.unprocessable_files,
         }
 
@@ -126,13 +129,11 @@ def run_scan(documents_root: Path | None = None) -> Worklist:
     current_engine = tesseract_version()
     current_langs = settings.tesseract_langs
 
-    meta_name = settings.meta_subfolder
     for path in root.rglob("*"):
         if not path.is_file():
             continue
+        # any dot-prefixed path component (covers .meta/ and any other hidden dirs)
         rel_parts = path.relative_to(root).parts
-        if any(p == meta_name for p in rel_parts):
-            continue
         if any(p.startswith(".") for p in rel_parts):
             wl.skipped += 1
             continue
@@ -213,6 +214,22 @@ def run_scan(documents_root: Path | None = None) -> Worklist:
             "missing_path": orphan.described_relative_path,
             "hash_in_sidecar": orphan.sidecar_hash,
             "matches_in_tree": [_rel(p) for p in orphan.matches_in_tree],
+        })
+
+    # quarantined sidecars (corrupt files moved aside by sidecar.read)
+    meta_name = settings.meta_subfolder
+    for path in root.rglob(f"{meta_name}/*.broken-*"):
+        if not path.is_file():
+            continue
+        # the original sidecar name had ``.broken-<ts>`` appended; strip that
+        # to recover the filename it described
+        original_sidecar_name = re.sub(r"\.broken-\d{8}-\d{6}$", "", path.name)
+        described_filename = original_sidecar_name[:-3] if original_sidecar_name.endswith(".md") else original_sidecar_name
+        described_path = path.parent.parent / described_filename
+        wl.quarantined_sidecars.append({
+            "quarantine_relative_path": str(path.relative_to(root)).replace("\\", "/"),
+            "for_file": _rel(described_path),
+            "original_filename": original_sidecar_name,
         })
 
     return wl

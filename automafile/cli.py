@@ -86,7 +86,8 @@ def scan(
         f"scan complete: seen={wl.files_seen} need_ocr={len(wl.files_needing_ocr)} "
         f"need_meta={len(wl.files_needing_metadata)} partial={len(wl.files_with_partial_metadata)} "
         f"stale={len(wl.files_with_stale_metadata)} ocr_review={len(wl.ocr_review_candidates)} "
-        f"orphans={len(wl.orphan_sidecars)} unprocessable={len(wl.unprocessable_files)}"
+        f"orphans={len(wl.orphan_sidecars)} quarantined={len(wl.quarantined_sidecars)} "
+        f"unprocessable={len(wl.unprocessable_files)}"
     )
     typer.echo(f"worklist: {out}")
 
