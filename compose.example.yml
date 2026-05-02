@@ -21,7 +21,9 @@ services:
       # the user's documents tree — REPLACE the host path with yours
       - "C:/Users/<you>/OneDrive/Documents:/docs"
 
-    # makes Ollama on the host reachable from inside the container
+    # makes Ollama on the host reachable from inside the container.
+    # required on native-Linux Docker; redundant (no-op) on Docker Desktop and
+    # Podman Desktop, which already inject host.docker.internal automatically.
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
