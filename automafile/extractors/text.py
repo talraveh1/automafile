@@ -13,5 +13,4 @@ def extract(path: Path) -> ExtractedDoc:
         path=path,
         text=text,
         format="text",
-        supports_native_metadata=False,
     )

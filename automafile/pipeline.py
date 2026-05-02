@@ -15,10 +15,8 @@ from automafile.extractors.base import (
 )
 from automafile.log import get_logger
 from automafile.llm import enrich, EnrichmentResult
-from automafile.metadata import native as native_meta
 from automafile.metadata import sidecar
-from automafile.metadata.hashing import hash_file
-from automafile.metadata.schema import MetadataDoc, OcrBlock, utc_now_iso
+from automafile.metadata.schema import OcrBlock, utc_now_iso
 from automafile.ocr import (
     OcrDecision,
     pdf_ocr_decision,
@@ -82,13 +80,22 @@ def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedD
 
 
 def _hints_for(doc: ExtractedDoc) -> dict:
-    return {
+    """Build the LLM context dict: filesystem facts + the file's own embedded
+    metadata (PDF DocInfo+XMP, Office core/custom props, EXIF, HTML <meta>,
+    EPUB Dublin Core). Each populated by the extractor, already cleaned and
+    length-clipped via ``extractors._meta.collect``.
+    """
+    hints: dict = {
         "filename": doc.path.name,
         "extension": doc.path.suffix.lstrip("."),
         "format": doc.format,
         "byte_size": doc.path.stat().st_size,
-        "has_native_metadata": bool(doc.native_metadata),
     }
+    if doc.extracted_metadata:
+        # extractor keys (e.g. ``core_title``, ``exif_DateTimeOriginal``) are
+        # namespaced enough to not collide with the four filesystem keys above.
+        hints.update(doc.extracted_metadata)
+    return hints
 
 
 def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -> ProcessResult:
@@ -140,29 +147,14 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         )
         return result
 
-    wrote_native = False
-    if doc.supports_native_metadata and native_meta.supports(path):
-        try:
-            native_meta.write(path, enrichment_dict)
-            wrote_native = True
-            result.metadata_target = "native"
-        except native_meta.NativeMetadataError as exc:
-            log.warning("Native metadata write failed for %s: %s", path, exc)
-
     meta_doc = sidecar.build_meta_doc_for_new_file(
         path,
         enrichment_dict,
         ocr_block=ocr_block.model_dump(),
     )
-    if not wrote_native:
-        spath = sidecar.write(path, meta_doc, summary_body=enrichment.summary)
-        result.sidecar_path = spath
-        result.metadata_target = "sidecar"
-    else:
-        # also drop a sidecar so the in-tree memory is consistent
-        spath = sidecar.write(path, meta_doc, summary_body=enrichment.summary)
-        result.sidecar_path = spath
-        result.metadata_target = "native+sidecar"
+    spath = sidecar.write(path, meta_doc, summary_body=enrichment.summary)
+    result.sidecar_path = spath
+    result.metadata_target = "sidecar"
 
     result.duration_ms = int((time.perf_counter() - started) * 1000)
     log.info(

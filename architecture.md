@@ -17,12 +17,12 @@ flowchart LR
    subgraph output ["<b>Output</b>"]
       direction TB
       llm["<b>LLM</b> · Ollama<br/><i>tiered JSON parse</i>"]:::ai
-      writers["<b>Metadata Writers</b><br/>native.py │ sidecar"]:::write
+      writers["<b>Sidecar Writer</b><br/><i>.meta/&lt;name&gt;.md</i>"]:::write
       notifier["<b>Notifier</b><br/><i>Windows toast</i>"]:::notify
       writers --> notifier
    end
 
-   cli["<b>Triage CLI</b><br/><i>filer-apply · scan<br/>review-ocr · reconcile</i>"]:::tool
+   cli["<b>Triage CLI</b><br/><i>inspect · mv · filer-apply<br/>scan · review-ocr · reconcile</i>"]:::tool
    triage[/"🗂️ Triage skill"/]:::tool
 
    inbox --> watcher --> pipeline
@@ -50,16 +50,16 @@ flowchart LR
    verifies size stability, then dispatches to `pipeline.process_file`.
 3. `pipeline.process_file` calls `dispatch.extract` to choose an extractor by
    suffix (or MIME, via `python-magic`).
-4. The extractor returns an `ExtractedDoc` containing text, native metadata
-   (if any), and an OCR recommendation.
+4. The extractor returns an `ExtractedDoc` containing text and an OCR
+   recommendation.
 5. If OCR is recommended, `ocr.run_ocr` is invoked (Tesseract for images;
    `pdf2image` + Tesseract for PDFs).
 6. `llm.enrich` calls Ollama. The response is parsed via tiered fallbacks:
    strict → repair → retry → regex → placeholder.
-7. The metadata is written via `metadata.native.write` (with mtime
-   preserved) when the format supports it; otherwise via
-   `metadata.sidecar.write`. Native-bearing files **also** get a sidecar so
-   the in-tree memory is consistent.
+7. Metadata is always written to a Markdown+YAML sidecar at
+   `<dir>/.meta/<filename>.md` via `metadata.sidecar.write`. The original
+   document is never touched. The hidden `.meta/` folder rides along with
+   the file in OneDrive sync.
 8. A debounced toast announces the change.
 
 ## Scanner
@@ -103,10 +103,17 @@ actually exists before honoring it, so the host's `config.jsonc` (with a
 Windows path) does not break the Linux container — the resolver falls
 through to `shutil.which("tesseract")` instead.
 
-## mtime preservation
+## Sidecars are the only metadata store
 
-Every native-metadata writer wraps its work in `metadata.mtime.preserve_times`,
-which captures `(atime_ns, mtime_ns)` before writing and restores via
-`os.utime(..., ns=...)` after. The file's content hash will change (OneDrive
-re-syncs the new bytes); Explorer's "Date modified" stays at the original.
+Original documents are never modified — the pipeline reads them, never
+writes back. All extracted/enriched metadata lives in
+`<dir>/.meta/<filename>.md`. Consequences:
+
+- File content hashes and mtimes are stable (no need to snapshot/restore
+  timestamps around writes).
+- Sidecars sync with the documents through OneDrive (the `.meta/` folder
+  rides along).
+- Moves must always travel the file *and* its sidecar. Use
+  `python -m automafile mv <src> <dst>` (or `filer-apply` for the
+  category-based path) — never raw `mv` / `move`.
 ```

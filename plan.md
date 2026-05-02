@@ -4,7 +4,7 @@
 
 The previous implementation built around Paperless-ngx is being retired. Paperless's "I own the files" model conflicts with the user's stated requirement: files must live in their own filesystem, be renameable/moveable outside any tool, and the metadata layer must be a helper, not a portal.
 
-The replacement is a thin Python pipeline that watches a folder, extracts text + metadata from each file (using OCR only when needed), asks a local Ollama LLM for tags + category + summary, writes that information **into the file itself** (native metadata) when the format supports it, and falls back to a Markdown sidecar in a hidden `.meta/` subfolder otherwise. A separate Claude Code skill named `/triage` decides where each file is filed (folder + smart filename), informed by project-local memory of the user's preferences and prior corrections.
+The replacement is a thin Python pipeline that watches a folder, extracts text from each file (using OCR only when needed), asks a local Ollama LLM for tags + category + summary, and writes that information to a Markdown sidecar in a hidden `.meta/` subfolder next to the file. **Original documents are never modified** — the sidecar is always the only source of truth. A separate Claude Code skill named `/triage` decides where each file is filed (folder + smart filename), informed by project-local memory of the user's preferences and prior corrections. Moves go through `python -m automafile mv` (or `filer-apply`) so the sidecar always travels with the file.
 
 **This plan is for a new agent starting from a fresh empty directory.** Do not reuse anything from the existing `d:\automafile` repo — it has Docker, PowerShell, Paperless integration, and other obsolete leftovers. Reference it only to copy across the prompt template, the memory file shapes, and the `/triage` SKILL.md skeleton, all of which translate cleanly.
 
@@ -75,9 +75,8 @@ The replacement is a thin Python pipeline that watches a folder, extracts text +
 │   ├── metadata/
 │   │   ├── __init__.py
 │   │   ├── schema.py            # pydantic models
-│   │   ├── native.py            # native-metadata writers per format
 │   │   ├── sidecar.py           # .md+YAML sidecar writer/reader
-│   │   ├── mtime.py             # save/restore filesystem mtime
+│   │   ├── hashing.py           # content-hash helper
 │   │   └── reconcile.py         # orphan detection, hash matching
 │   ├── scanner.py               # tree walker → worklist
 │   ├── notifier.py              # toast + console fallback
@@ -103,9 +102,12 @@ The replacement is a thin Python pipeline that watches a folder, extracts text +
 │   ├── fixtures/                # sample PDFs, JPEGs, docx, etc.
 │   ├── test_dispatch.py
 │   ├── test_ocr_decision.py
-│   ├── test_native_metadata.py
 │   ├── test_sidecar.py
 │   ├── test_reconcile.py
+│   ├── test_filer.py
+│   ├── test_mv.py
+│   ├── test_pipeline.py
+│   ├── test_scanner.py
 │   └── test_llm_parse.py
 └── docs/
     └── architecture.md
@@ -184,7 +186,7 @@ The script is intentionally PowerShell-thin; the heavy work lives in Python.
 
 ### Sidecar (Markdown + YAML frontmatter)
 
-For files where native metadata isn't possible. Lives at `<file_dir>/.meta/<filename>.<ext>.md`.
+The single metadata store. Every file gets one, regardless of format. Lives at `<file_dir>/.meta/<filename>.<ext>.md`.
 
 ```markdown
 ---
@@ -224,24 +226,25 @@ Short, factual 1-3 sentence summary in the document's main language.
 
 `relative_path` is relative to `DOCUMENTS_ROOT`, **not** absolute. This makes the whole tree portable.
 
-### Native metadata mapping
+### Native metadata writes — removed
 
-Each format gets the same logical fields written into its own metadata block:
+A previous version of this plan called for writing metadata into the file
+itself (XMP for PDFs/images, OOXML core+custom for Office). That entire
+path has been removed. Reasons:
 
-| Logical field | PDF (Info dict + XMP) | DOCX (core + custom) | XLSX/PPTX (core + custom) | JPEG/PNG (XMP/EXIF) |
-|---|---|---|---|---|
-| Tags | `Keywords` | `cp:keywords` | `cp:keywords` | `XMP:Subject` (list) |
-| Category (single) | custom XMP `automafile:Category` | custom prop `Category` | custom prop `Category` | XMP `automafile:Category` |
-| Title | `Title` | `cp:title` | `cp:title` | XMP `dc:title` |
-| Summary | `Subject` (cap ~500 chars) or XMP `dc:description` | `cp:description` | `cp:description` | XMP `dc:description` / EXIF `ImageDescription` |
-| Correspondent | XMP `automafile:Correspondent` | custom prop `Correspondent` | custom prop `Correspondent` | XMP `automafile:Correspondent` |
-| Document date | `pdf:CreationDate` (only if absent) or XMP `automafile:DocumentDate` | custom prop `DocumentDate` | custom prop `DocumentDate` | XMP `automafile:DocumentDate` (do not touch EXIF DateTimeOriginal) |
-| Confidence | XMP `automafile:Confidence` | custom prop `Confidence` | custom prop `Confidence` | XMP `automafile:Confidence` |
-| Metadata modified | `pdf:ModDate` is preserved; instead use XMP `xmp:MetadataDate` | custom prop `MetadataModified` | custom prop `MetadataModified` | XMP `xmp:MetadataDate` |
+1. Sidecar duplication of the same data was redundant and a maintenance
+   tax (two writers, two readers, two consistency cycles).
+2. `python-docx` and `python-pptx` don't expose custom properties cleanly,
+   so the docx/pptx writer was a silent no-op.
+3. Modifying the user's documents in-place (even with mtime preserved)
+   changes their content hash and triggers OneDrive resyncs of large PDFs
+   for what is effectively bookkeeping data.
+4. Sidecars sync with the documents through OneDrive anyway — there's no
+   portability gain from embedding.
 
-`automafile:` is a custom XMP namespace declared once in `metadata/native.py`. Everything our tool owns goes there to avoid stomping on standard fields.
-
-**Strict rule:** native writers MUST snapshot file mtime/atime *before* writing and restore them after, via `os.utime(path, ns=(atime_ns, mtime_ns))`. The file's content hash will change (acceptable; OneDrive will re-sync); the mtime stays the same so Explorer and most tooling see no change.
+Today, the *only* metadata store is the sidecar at
+`<dir>/.meta/<filename>.md`. Original documents are read-only to the
+pipeline.
 
 ### Scanner output schema
 
@@ -322,19 +325,18 @@ memory/
 
 - Function `extract(path: Path) -> ExtractedDoc`.
 - Maps extension → extractor module, with `python-magic` fallback for unknown extensions.
-- Returns a uniform `ExtractedDoc(text: str, native_metadata: dict, ocr_used: bool, ocr_decision: str)`.
+- Returns a uniform `ExtractedDoc(text: str, ocr_used: bool, ocr_decision: str, format: str, ...)`.
 
 ### `automafile/extractors/*.py`
 
 Each extractor:
 
 - Returns `ExtractedDoc`.
-- Reads native metadata where present (don't overwrite — only fill missing).
-- Never modifies the source file.
+- Never modifies the source file (read-only).
 - For PDFs: try `pypdf` text layer first; if `< 100` chars **or** if any page has `< 50` chars and `≥30%` of pages are sparse, recommend OCR (full or partial). Encrypted PDFs raise a typed exception caught by the dispatcher and routed to `unprocessable_files`.
 - For images: always recommend OCR. The decision is made before extraction; the OCR module produces the text.
-- For Office: read `cp:` properties + custom properties; native text via `python-docx` etc.
-- For text/HTML/Markdown: direct read; no metadata block to read.
+- For Office: extract text via `python-docx` / `openpyxl` / `python-pptx`.
+- For text/HTML/EPUB/Markdown: direct read.
 
 ### `automafile/ocr.py`
 
@@ -356,38 +358,15 @@ Each extractor:
   5. placeholder result with `category=unknown`, `confidence=low`, `needs_review=true` so the file still lands in the metadata, never disappears.
 - Returns the tier label so the watcher can log it.
 
-### `automafile/metadata/native.py`
-
-One writer per format. Each:
-
-1. Snapshots `(atime_ns, mtime_ns)` of the file.
-2. Opens / parses the file via the appropriate library.
-3. Maps logical fields → format-specific keys per the table above.
-4. Writes back to the file.
-5. Restores `(atime, mtime)`.
-6. Always populates `xmp:MetadataDate` (or the equivalent custom prop) with current UTC ISO timestamp.
-
-If a write fails (corrupt file, locked by another process, encrypted), the writer raises a typed exception and the caller falls through to sidecar.
-
 ### `automafile/metadata/sidecar.py`
 
+- The single metadata writer/reader. Every file gets a sidecar.
 - Lives in `<file_dir>/.meta/<filename>.<ext>.md`.
-- The `.meta/` folder is created with NTFS hidden attribute (`+h`); files inside are *not* hidden.
+- The `.meta/` folder is created with NTFS hidden attribute (`+h`) on Windows; files inside are *not* hidden.
 - Read: parse YAML frontmatter via `PyYAML`, body remains as Markdown.
 - Write: format frontmatter deterministically (sorted keys, stable ordering) so diffs are clean. Body lines for `# Summary` and `# Notes` are preserved if present, replaced if not.
 - Hash: SHA-256 of the *file content*, prefixed with `sha256:`.
-- The sidecar is the source of truth for misfit formats; never partial.
-
-### `automafile/metadata/mtime.py`
-
-Tiny module with two helpers:
-
-```python
-def snapshot(path: Path) -> tuple[int, int]: ...
-def restore(path: Path, snapshot: tuple[int, int]) -> None: ...
-```
-
-Both modules above use these.
+- Corrupt sidecars are quarantined (`<name>.broken-<ts>`) rather than overwritten on the next write.
 
 ### `automafile/metadata/reconcile.py`
 
@@ -413,7 +392,7 @@ Both modules above use these.
   1. Dispatch to extractor.
   2. If OCR is recommended, run OCR.
   3. Build hint dict and call `llm.enrich`.
-  4. Write metadata: native if format supports, else sidecar.
+  4. Write a sidecar (`<dir>/.meta/<filename>.md`). The original file is never modified.
   5. Log per-file line: `relative_path | ocr=<decision> | tier=<llm_tier> | category=<x> | duration=<ms>`.
   6. Best-effort fire toast.
 
@@ -442,11 +421,14 @@ Typer app with these commands:
 | Command | Purpose |
 |---|---|
 | `automafile watch` | Start the watcher (foreground; user backgrounds it via Task Scheduler or NSSM). |
-| `automafile process <path>` | Process a single file once. For debugging or manual re-runs. |
+| `automafile process [<path>]` | Process a worklist (default: sweep `storage/scan/`) or a single file. Each successfully-processed worklist entry is stamped with a ``processed`` ISO timestamp and the JSON is atomically rewritten after every file (flush + fsync + rename), so a crash mid-run keeps the marks already made. Subsequent runs skip entries whose mark is at-or-after the file's mtime; pass ``--force`` to redo regardless. Failures are never marked and are retried next run. |
 | `automafile ocr <path>` | Force OCR on a file regardless of decision. |
 | `automafile scan` | Run scanner; write worklist to `storage/scan/scan-<ts>.json`. |
 | `automafile review-ocr` | Walk `ocr_review_candidates` interactively; for each, ask y/n. On y: re-OCR. On n: bump `metadata_modified`. |
 | `automafile reconcile` | Walk orphan sidecars interactively; for each, propose hash-matched relocation. |
+| `automafile inspect [<path>]` | Read-only JSON dump of sidecar metadata. Default scope: walk the inbox. Used by `/triage`. |
+| `automafile mv <src> <dst> [-f]` | Move a file together with its sidecar. Fails if either target exists, unless `-f`. |
+| `automafile filer-apply` | Category-based move: composes `<documents_root>/<category>[/<sub>]/<name>` and refreshes sidecar fields after the move. |
 | `automafile bootstrap` | Create memory templates, seed taxonomy if absent. |
 
 Every command takes `--documents-root` to override the env, and `--dry-run` where it makes sense.
@@ -471,7 +453,7 @@ Project-local memory lives in `memory/` (gitignored). When working on filing dec
 
 ## Architecture
 
-Files live in the user's filesystem under `<DOCUMENTS_ROOT>/<INBOX_DIR>` and `<DOCUMENTS_ROOT>/<MANAGED_DIR>`. The Python pipeline (under `automafile/`) extracts text, runs OCR when needed, calls Ollama for enrichment, and writes metadata into the file (native) or a `.meta/<filename>.md` sidecar. The `/triage` skill decides where each file is filed.
+Files live in the user's filesystem under `<DOCUMENTS_ROOT>/<INBOX_DIR>` and `<DOCUMENTS_ROOT>/<MANAGED_DIR>`. The Python pipeline (under `automafile/`) extracts text, runs OCR when needed, calls Ollama for enrichment, and writes metadata to a `.meta/<filename>.md` sidecar — every file gets one. Original documents are never modified. The `/triage` skill decides where each file is filed; moves go through `automafile mv` (or `filer-apply`) so the sidecar always travels with the file.
 
 ## Skill scope
 
@@ -497,14 +479,13 @@ Workflow (mirrors the v1 skill in spirit; differences flagged):
 2. **Drift / orphan review** — for orphan sidecars in the latest scan, propose relinks (hash-matched candidates) and apply user's choices.
 3. **Build the queue** — files in `<INBOX_DIR>` (not yet filed) AND files flagged in scan worklist as `needs_metadata` / `partial_metadata` / `stale_metadata`. Sort by oldest-first.
 4. **For each doc:**
-   - Read its current metadata (native or sidecar).
+   - Read its sidecar via `automafile inspect <path>` (always JSON, read-only).
    - If summary present and ≥100 chars → use it.
-   - Else, read sibling sidecar's `# Summary` body if any.
-   - Else, `automafile process <path>` to generate one in-place. (Calls back into the Python pipeline; cheap when OCR isn't needed.)
+   - Else, `automafile process <path>` to generate the sidecar in-place. (Calls back into the Python pipeline; cheap when OCR isn't needed.)
    - If still empty/unusable → ask the user for guidance.
 5. **Decide** filing: `category`, optional `subcategory`, `smart_name`. Apply preferences-md rules and corrections.jsonl precedents.
 6. **Auto-apply gate** — same four conditions as v1: `confidence-high`, no review-needed, category exists in taxonomy, taxonomy unchanged since enrichment.
-7. **Apply** — call `automafile process` if needed to refresh metadata; then `automafile filer apply --path <path> --category <c> --subcategory <s> --name <smart>` (a thin Python entry point that invokes `filer.apply_filing`).
+7. **Apply** — call `automafile process` if needed to refresh the sidecar; then either `automafile filer-apply --path <path> --category <c> --subcategory <s> --name <smart>` for category-based filing, or `automafile mv <src> <dst>` for ad-hoc relocations. Both move the file and its sidecar together. Never use raw `mv`/`move`.
 8. **Cluster + propose new categories** — same threshold rule (≥3 docs, single docs never spawn).
 9. **Learn** — append corrections to `memory/corrections.jsonl`. Propose new `preferences.md` rules after 3 similar corrections.
 10. **OCR review** — at end of session, surface `ocr_review_candidates` from the scan; for each, ask user; on yes, run `automafile ocr`; on no, bump `metadata_modified` so it doesn't reappear.
@@ -543,24 +524,22 @@ The scanner emits `ocr_review_candidates` when a file's recorded `ocr.engine_ver
 - `No, leave it` → only bump `metadata_modified` so the file isn't surfaced on the next scan.
 - `Skip for now` → no change; will reappear on next scan.
 
-## mtime preservation — explicit rule
+## Source files are read-only to the pipeline
 
-Every native-metadata writer:
+The pipeline never writes back to the user's documents — no XMP injection,
+no OOXML core-property bumps, no EXIF tags. All extracted/enriched
+information lives in the sidecar. This means:
 
-```python
-ns = (path.stat().st_atime_ns, path.stat().st_mtime_ns)
-try:
-    write_metadata_to_file(path, ...)
-finally:
-    os.utime(path, ns=ns)
-```
-
-Hash will change. mtime will not. OneDrive will re-sync the new bytes (this is desired behavior — the user wants metadata replicated). Explorer's "Date modified" column stays at the original.
+- Document content hashes are stable; OneDrive does not resync large PDFs
+  for metadata-only changes.
+- "Date modified" in Explorer reflects real edits, not bookkeeping.
+- No need to snapshot/restore `(atime, mtime)` around writes — there are
+  no writes to documents.
 
 ## OneDrive specifics
 
 - Document the requirement that `<DOCUMENTS_ROOT>/<INBOX_DIR>` and `<MANAGED_DIR>` are pinned to "Always keep on this device" before running the watcher. Put this in `README.md` quickstart.
-- Sidecars and native-metadata writes both happen on local files, so OneDrive will sync them up correctly.
+- Sidecars sync alongside their files (the `.meta/` folder is a sibling, not an alternate stream).
 - Don't rely on NTFS Alternate Data Streams anywhere — OneDrive does not preserve them.
 
 ## Toast notification
@@ -572,10 +551,10 @@ Foreground watcher prints to console. When `windows-toasts` is installed, also p
 The implementing agent must demonstrate each of these end to end before declaring done:
 
 1. **Bootstrap** — fresh clone, `.\scripts\install.ps1` runs cleanly, venv created, deps installed, Tesseract + Ollama verified, memory templates seeded, `Inbox` and `Automafile` dirs exist.
-2. **Watcher happy path** — drop a Hebrew PDF with a text layer into `Inbox/`. Watcher fires, no OCR runs, summary written into the PDF's `Subject`, log line shows `tier=strict ocr=no_ocr`. Verify via `pdfinfo` (or `pikepdf` REPL) that the metadata is present.
-3. **Watcher OCR path** — drop a Hebrew JPEG. Watcher runs Tesseract with `heb+eng`, summary written into XMP `dc:description`. Verify with `exiftool` or `pikepdf`.
+2. **Watcher happy path** — drop a Hebrew PDF with a text layer into `Inbox/`. Watcher fires, no OCR runs, sidecar `<Inbox>/.meta/<name>.pdf.md` is written, log line shows `target=sidecar tier=strict ocr=no_ocr`. The PDF itself is byte-identical to what was dropped (verify with sha256).
+3. **Watcher OCR path** — drop a Hebrew JPEG. Watcher runs Tesseract with `heb+eng`, sidecar contains the recovered text in `# Summary` and `ocr.engine=tesseract`. Verify the JPEG is byte-identical.
 4. **Sidecar path** — drop a `.txt` file with Hebrew content. Watcher writes `<file_dir>/.meta/<name>.txt.md` with frontmatter + body. Verify the `.meta/` folder has `+h` attribute (`attrib +h .meta`).
-5. **mtime preserved** — record `Get-ItemProperty <pdf>` mtime before drop; after watcher writes metadata, mtime is unchanged.
+5. **No source-file mutation** — record `Get-FileHash <pdf>` before drop; after watcher fires, the hash is unchanged.
 6. **LLM tier fallback** — synthetically inject malformed JSON via a stub Ollama responder (or by setting model temperature to 1.0) and verify `tier=repair` or `tier=retry` is logged, never `tier=placeholder` for content-bearing files.
 7. **Scanner** — `automafile scan` walks the tree and produces a worklist with the right shape. Manually delete a sidecar's referenced file; the next `scan` reports it as `orphan_sidecars` with hash matches if applicable.
 8. **Re-OCR review surfaces** — change `TESSERACT_LANGS` from `heb+eng` to `heb`; next `scan` lists previously-OCR'd files in `ocr_review_candidates`, **not** in `files_needing_ocr`. Run `automafile review-ocr`, decline; verify `metadata_modified` bumped and the file no longer surfaces on subsequent scans.

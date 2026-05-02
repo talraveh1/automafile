@@ -1,9 +1,11 @@
-"""PDF extractor: pypdf for text + pikepdf for metadata."""
+"""PDF extractor: pypdf for text. Embedded metadata via pikepdf (DocInfo + XMP)."""
 
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+from automafile.extractors._meta import collect
 from automafile.extractors.base import (
     CorruptDocumentError,
     EncryptedDocumentError,
@@ -11,28 +13,59 @@ from automafile.extractors.base import (
 )
 
 
-def _read_pikepdf_metadata(path: Path) -> tuple[dict, bool]:
-    """Return (metadata-dict, is_encrypted)."""
+_XMP_NS_PREFIX = {
+    "http://purl.org/dc/elements/1.1/": "dc",
+    "http://ns.adobe.com/xap/1.0/": "xmp",
+    "http://ns.adobe.com/xap/1.0/mm/": "xmpMM",
+    "http://ns.adobe.com/xap/1.0/rights/": "xmpRights",
+    "http://ns.adobe.com/pdf/1.3/": "pdf",
+    "http://ns.adobe.com/pdfx/1.3/": "pdfx",
+    "http://ns.adobe.com/photoshop/1.0/": "photoshop",
+    "http://www.w3.org/1999/02/22-rdf-syntax-ns#": "rdf",
+    "http://automafile.local/schema/1.0/": "automafile",
+}
+
+
+def _normalize_xmp_key(k: str) -> str:
+    """Turn ``{namespace}localname`` Clark notation into ``prefix:localname``.
+
+    Falls back to ``xmp_<localname>`` when the namespace isn't recognized,
+    rather than emitting an unwieldy URL-bearing key.
+    """
+    if not (k.startswith("{") and "}" in k):
+        return k
+    ns, local = k[1:].split("}", 1)
+    prefix = _XMP_NS_PREFIX.get(ns)
+    return f"{prefix}:{local}" if prefix else f"xmp_{local}"
+
+
+def _read_pdf_metadata(path: Path) -> tuple[dict[str, Any], bool]:
+    """Return ``(extracted_metadata, is_encrypted)``.
+
+    Combines the legacy ``/Info`` dictionary (under ``info_<Key>`` keys) with
+    every XMP property pikepdf exposes (normalized to ``prefix:localname``,
+    e.g. ``dc:title``, ``xmp:CreateDate``, ``pdf:Producer``).
+    """
     try:
         import pikepdf
     except ImportError:
         return {}, False
     try:
         with pikepdf.open(path) as pdf:
-            info = {}
+            raw: dict[str, Any] = {}
             try:
-                docinfo = pdf.docinfo
-                for k, v in docinfo.items():
-                    info[str(k).lstrip("/")] = str(v)
+                for k, v in pdf.docinfo.items():
+                    raw[f"info_{str(k).lstrip('/')}"] = str(v)
             except Exception:
                 pass
             try:
                 with pdf.open_metadata() as xmp:
                     for k, v in dict(xmp).items():
-                        info[k] = str(v)
+                        key = _normalize_xmp_key(str(k))
+                        raw[key] = v if isinstance(v, list) else str(v)
             except Exception:
                 pass
-            return info, False
+            return collect(raw), False
     except pikepdf.PasswordError:
         return {}, True
     except Exception as exc:  # noqa: BLE001
@@ -61,7 +94,7 @@ def _per_page_chars(path: Path) -> list[int]:
 
 
 def extract(path: Path) -> ExtractedDoc:
-    metadata, encrypted = _read_pikepdf_metadata(path)
+    metadata, encrypted = _read_pdf_metadata(path)
     if encrypted:
         raise EncryptedDocumentError(f"PDF is encrypted: {path}")
 
@@ -89,10 +122,9 @@ def extract(path: Path) -> ExtractedDoc:
     return ExtractedDoc(
         path=path,
         text=text,
-        native_metadata=metadata,
         format="pdf",
-        supports_native_metadata=True,
         per_page_chars=per_page_chars,
+        extracted_metadata=metadata,
     )
 
 

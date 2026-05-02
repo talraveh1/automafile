@@ -15,9 +15,11 @@ overrides a `/triage` proposal.
 Files live in the user's filesystem under `<documents_root>/<inbox_dir>`
 (drop zone) and `<documents_root>/<Category>[/<Subcategory>]/<smart-name>.<ext>`
 (filed). The Python package (under `automafile/`) extracts text, runs
-OCR when needed, calls Ollama for enrichment, and writes metadata into the
-file (native) or a `.meta/<filename>.md` sidecar. The `/triage` skill
-decides where each file is filed.
+OCR when needed, calls Ollama for enrichment, and writes metadata to a
+`.meta/<filename>.md` sidecar — every file gets one, regardless of format.
+Original documents are never modified. The `/triage` skill decides where
+each file is filed; moves go through `python -m automafile mv` or
+`filer-apply` so the sidecar always travels with the file.
 
 ## Run modes
 

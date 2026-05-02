@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from automafile.extractors._meta import collect
 from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+
+
+# openpyxl DocumentProperties attributes — the OOXML core properties
+# Windows 11 surfaces for spreadsheets.
+_CORE_ATTRS = (
+    "title", "subject", "creator", "keywords", "description", "lastModifiedBy",
+    "category", "contentStatus", "identifier", "language", "version",
+    "revision", "created", "modified", "lastPrinted",
+)
 
 
 def extract(path: Path) -> ExtractedDoc:
@@ -25,22 +35,33 @@ def extract(path: Path) -> ExtractedDoc:
             if line.strip():
                 chunks.append(line)
 
-    metadata: dict = {}
+    raw_core: dict = {}
     try:
         cp = wb.properties
-        for attr in ("title", "subject", "keywords", "category", "description", "creator"):
-            v = getattr(cp, attr, None)
-            if v:
-                metadata[attr] = v
+        for attr in _CORE_ATTRS:
+            raw_core[attr] = getattr(cp, attr, None)
+    except Exception:
+        pass
+
+    raw_custom: dict = {}
+    try:
+        custom = getattr(wb, "custom_doc_props", None)
+        if custom is not None:
+            for prop in custom.props:
+                raw_custom[prop.name] = getattr(prop, "value", None)
     except Exception:
         pass
 
     wb.close()
 
+    metadata = {
+        **collect(raw_core, prefix="core_"),
+        **collect(raw_custom, prefix="custom_"),
+    }
+
     return ExtractedDoc(
         path=path,
         text="\n".join(chunks),
-        native_metadata=metadata,
         format="xlsx",
-        supports_native_metadata=True,
+        extracted_metadata=metadata,
     )

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+from automafile.extractors._meta import collect
 from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
 
 
@@ -18,18 +20,23 @@ def extract(path: Path) -> ExtractedDoc:
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
     text = soup.get_text(separator="\n").strip()
-    metadata: dict = {}
+
+    raw_meta: dict[str, Any] = {}
     if soup.title and soup.title.string:
-        metadata["title"] = soup.title.string.strip()
-    for meta in soup.find_all("meta"):
-        name = meta.get("name") or meta.get("property")
-        content = meta.get("content")
+        raw_meta["title"] = soup.title.string
+    for tag in soup.find_all("meta"):
+        name = tag.get("name") or tag.get("property") or tag.get("http-equiv")
+        content = tag.get("content")
         if name and content:
-            metadata[f"meta_{name}"] = content.strip()
+            raw_meta[f"meta_{name}"] = content
+    if getattr(soup, "html", None) is not None:
+        lang = soup.html.get("lang") if hasattr(soup.html, "get") else None
+        if lang:
+            raw_meta["html_lang"] = lang
+
     return ExtractedDoc(
         path=path,
         text=text,
-        native_metadata=metadata,
         format="html",
-        supports_native_metadata=False,
+        extracted_metadata=collect(raw_meta),
     )

@@ -4,7 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from automafile.extractors._meta import collect
 from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+
+
+# python-pptx CoreProperties attributes — same OOXML core schema as docx.
+_CORE_ATTRS = (
+    "title", "author", "subject", "keywords", "category", "comments",
+    "last_modified_by", "revision", "version", "created", "modified",
+    "last_printed", "content_status", "identifier", "language",
+)
 
 
 def extract(path: Path) -> ExtractedDoc:
@@ -27,20 +36,17 @@ def extract(path: Path) -> ExtractedDoc:
                     if line.strip():
                         chunks.append(line)
 
-    metadata: dict = {}
+    raw: dict = {}
     try:
         cp = pres.core_properties
-        for attr in ("title", "subject", "keywords", "category", "comments", "author"):
-            v = getattr(cp, attr, None)
-            if v:
-                metadata[attr] = v
+        for attr in _CORE_ATTRS:
+            raw[attr] = getattr(cp, attr, None)
     except Exception:
         pass
 
     return ExtractedDoc(
         path=path,
         text="\n".join(chunks),
-        native_metadata=metadata,
         format="pptx",
-        supports_native_metadata=True,
+        extracted_metadata=collect(raw, prefix="core_"),
     )

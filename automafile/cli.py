@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -50,6 +52,7 @@ def process(
     path: Annotated[Optional[Path], typer.Argument(help="A file to process, a worklist JSON, or omitted to auto-pick the newest matching worklist.")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Run extraction + LLM but write nothing.")] = False,
     force_ocr: Annotated[bool, typer.Option("--force-ocr", help="Force OCR even if not recommended.")] = False,
+    force: Annotated[bool, typer.Option("-f", "--force", help="Re-process worklist entries even if their `processed` mark is at-or-after the file's mtime.")] = False,
     stop_on_error: Annotated[bool, typer.Option("--stop-on-error", help="Worklist mode only: stop at the first failure.")] = False,
 ) -> None:
     """Process a worklist (default) or a single file."""
@@ -58,7 +61,7 @@ def process(
 
     settings = get_settings()
     if path is None or _looks_like_worklist(path, settings.scan_dir):
-        _process_worklist(path, settings, dry_run=dry_run, force_ocr=force_ocr, stop_on_error=stop_on_error)
+        _process_worklist(path, settings, dry_run=dry_run, force_ocr=force_ocr, force=force, stop_on_error=stop_on_error)
         return
     log.info("CLI: process %s (dry_run=%s force_ocr=%s)", path, dry_run, force_ocr)
     result = process_file(path, dry_run=dry_run, force_ocr=force_ocr)
@@ -122,17 +125,93 @@ def scan(
     typer.echo(f"next: automafile process")
 
 
+_WORKLIST_BUCKETS = (
+    "files_needing_ocr",
+    "files_needing_metadata",
+    "files_with_partial_metadata",
+    "files_with_stale_metadata",
+)
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    """Write ``data`` to ``path`` durably: temp file → flush → fsync → rename.
+
+    Used to update worklists after each processed file so a crash mid-run
+    doesn't lose the marks already made.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+def _utc_iso_now() -> str:
+    # microseconds, not seconds: file mtimes carry sub-second precision on
+    # most filesystems, so a seconds-resolution mark can compare as "older
+    # than the file" within the same second and trigger spurious re-runs.
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _is_already_processed(rel: str, refs: list, documents_root: Path) -> bool:
+    """True if ``rel`` has been marked ``processed`` and its file mtime hasn't moved past that mark.
+
+    ``refs`` is a list of ``(source_path, bucket_name, entry_dict)`` tuples;
+    we take the most-recent ``processed`` timestamp across them and compare
+    to the file's current mtime.
+    """
+    file_path = documents_root / rel
+    if not file_path.exists():
+        return False
+    try:
+        file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
+    except OSError:
+        return False
+    latest: datetime | None = None
+    for _, _, entry in refs:
+        ts = entry.get("processed")
+        if not ts:
+            continue
+        try:
+            t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            continue
+        if latest is None or t > latest:
+            latest = t
+    if latest is None:
+        return False
+    return file_mtime <= latest
+
+
+def _mark_processed(refs: list, source_data: dict, ts: str) -> set[Path]:
+    """Stamp every entry that referenced this rel with ``processed = ts``.
+
+    Returns the set of source paths that were touched, so the caller knows
+    which files to rewrite.
+    """
+    touched: set[Path] = set()
+    for src_path, _, entry in refs:
+        entry["processed"] = ts
+        touched.add(src_path)
+    return touched
+
+
 def _process_worklist(
     worklist: Optional[Path],
     settings,
     *,
     dry_run: bool,
     force_ocr: bool,
+    force: bool,
     stop_on_error: bool,
 ) -> None:
     from automafile.pipeline import format_result_line, process_file
 
-    log.info("CLI: process worklist (worklist=%s dry_run=%s force_ocr=%s)", worklist, dry_run, force_ocr)
+    log.info(
+        "CLI: process worklist (worklist=%s dry_run=%s force_ocr=%s force=%s)",
+        worklist, dry_run, force_ocr, force,
+    )
     expected_root = str(settings.documents_root)
     explicit = worklist is not None
     sources: list[Path]
@@ -163,14 +242,10 @@ def _process_worklist(
         else:
             typer.echo(f"merging {len(sources)} worklists for {expected_root}")
 
-    buckets = (
-        "files_needing_ocr",
-        "files_needing_metadata",
-        "files_with_partial_metadata",
-        "files_with_stale_metadata",
-    )
-    seen: set[str] = set()
-    todo: list[str] = []
+    # Load each source once; build entries_by_rel so a single rel can be
+    # marked across every worklist that references it (we may merge several).
+    source_data: dict[Path, dict] = {}
+    entries_by_rel: dict[str, list[tuple[Path, str, dict]]] = {}
     for src in sources:
         data = json.loads(src.read_text(encoding="utf-8"))
         wl_root = data.get("documents_root")
@@ -181,25 +256,51 @@ def _process_worklist(
             )
             log.error("process: %s root mismatch (worklist=%s, current=%s)", src.name, wl_root, expected_root)
             raise typer.Exit(2)
-        for bucket in buckets:
+        source_data[src] = data
+        for bucket in _WORKLIST_BUCKETS:
             for entry in data.get(bucket, []):
                 rel = entry.get("relative_path")
-                if rel and rel not in seen:
-                    seen.add(rel)
-                    todo.append(rel)
+                if rel:
+                    entries_by_rel.setdefault(rel, []).append((src, bucket, entry))
+
+    # Decide what to do: keep order-of-discovery; drop already-processed
+    # unless --force; dedup so the same rel doesn't run twice in one invocation.
+    todo: list[str] = []
+    skipped = 0
+    seen: set[str] = set()
+    for src in sources:
+        data = source_data[src]
+        for bucket in _WORKLIST_BUCKETS:
+            for entry in data.get(bucket, []):
+                rel = entry.get("relative_path")
+                if not rel or rel in seen:
+                    continue
+                seen.add(rel)
+                refs = entries_by_rel[rel]
+                if not force and _is_already_processed(rel, refs, settings.documents_root):
+                    skipped += 1
+                    continue
+                todo.append(rel)
+
+    label = sources[0].name if len(sources) == 1 else f"{len(sources)} worklists"
 
     if not todo:
-        label = sources[0].name if len(sources) == 1 else f"{len(sources)} worklists"
-        typer.echo(f"nothing to process in {label}")
-        log.info("process: nothing to process across %d worklist(s)", len(sources))
+        msg = f"nothing to process in {label}"
+        if skipped:
+            msg += f" ({skipped} already-processed entr{'y' if skipped == 1 else 'ies'} skipped; use --force to redo)"
+        typer.echo(msg)
+        log.info("process: nothing to process across %d worklist(s) (skipped=%d)", len(sources), skipped)
         if not explicit:
             for src in sources:
                 src.unlink(missing_ok=True)
         return
 
-    label = sources[0].name if len(sources) == 1 else f"{len(sources)} worklists"
-    typer.echo(f"processing {len(todo)} file(s) from {label}")
-    log.info("process: %d file(s) from %d worklist(s)", len(todo), len(sources))
+    msg = f"processing {len(todo)} file(s) from {label}"
+    if skipped:
+        msg += f" ({skipped} already-processed skipped; use --force to redo)"
+    typer.echo(msg)
+    log.info("process: %d file(s) from %d worklist(s) (skipped=%d)", len(todo), len(sources), skipped)
+
     failures = 0
     for rel in todo:
         path = settings.documents_root / rel
@@ -216,6 +317,17 @@ def _process_worklist(
             failures += 1
             if stop_on_error:
                 raise typer.Exit(1)
+            continue
+        if dry_run:
+            # dry-run did no real work; don't pollute the worklist with marks.
+            continue
+        # Mark every reference to this rel and durably rewrite each touched source.
+        touched = _mark_processed(entries_by_rel[rel], source_data, _utc_iso_now())
+        for src_path in touched:
+            try:
+                _atomic_write_json(src_path, source_data[src_path])
+            except OSError as exc:
+                log.warning("process: could not rewrite %s after marking %s: %s", src_path, rel, exc)
 
     typer.echo(f"done: {len(todo) - failures}/{len(todo)} succeeded")
     log.info("process done: %d/%d succeeded", len(todo) - failures, len(todo))
@@ -274,6 +386,116 @@ def review_ocr(
                 doc.metadata_modified = utc_now_iso()
                 sidecar_write(path, doc, summary, notes)
             typer.echo("  declined; metadata_modified bumped.")
+
+
+@app.command()
+def inspect(
+    path: Annotated[Optional[Path], typer.Argument(help="A file or directory. Omit to walk the inbox.")] = None,
+    recursive: Annotated[bool, typer.Option("--recursive/--no-recursive", help="Walk directories recursively.")] = True,
+) -> None:
+    """Dump sidecar metadata for one or many files as JSON. Read-only — no extraction, no LLM, no writes."""
+    from automafile.config import get_settings
+
+    settings = get_settings()
+    target = path if path is not None else settings.inbox_path
+
+    if not target.exists():
+        typer.echo(f"path not found: {target}", err=True)
+        raise typer.Exit(1)
+
+    paths = _collect_inspect_paths(target, recursive)
+    log.info("CLI: inspect %s (files=%d, recursive=%s)", target, len(paths), recursive)
+    out = [_inspect_one(p, settings.documents_root) for p in paths]
+    typer.echo(json.dumps(out, indent=2, ensure_ascii=False, default=str))
+
+
+def _collect_inspect_paths(start: Path, recursive: bool) -> list[Path]:
+    if start.is_file():
+        return [start]
+    iterator = start.rglob("*") if recursive else start.iterdir()
+    paths: list[Path] = []
+    for p in sorted(iterator):
+        if not p.is_file():
+            continue
+        try:
+            rel_parts = p.relative_to(start).parts
+        except ValueError:
+            rel_parts = ()
+        if any(part.startswith(".") for part in rel_parts):
+            continue
+        paths.append(p)
+    return paths
+
+
+def _inspect_one(file_path: Path, documents_root: Path) -> dict:
+    from automafile.metadata.sidecar import read as sidecar_read
+
+    try:
+        rel = str(file_path.relative_to(documents_root)).replace("\\", "/")
+    except ValueError:
+        rel = str(file_path).replace("\\", "/")
+
+    try:
+        doc, summary, notes = sidecar_read(file_path)
+    except Exception as exc:
+        doc, summary, notes = None, "", ""
+        log.debug("sidecar read failed for %s: %s", file_path, exc)
+
+    if doc is not None:
+        return {
+            "relative_path": rel,
+            "has_sidecar": True,
+            "metadata": doc.to_frontmatter_dict(),
+            "summary": summary,
+            "notes": notes,
+        }
+    return {
+        "relative_path": rel,
+        "has_sidecar": False,
+        "metadata": None,
+        "summary": None,
+        "notes": None,
+    }
+
+
+@app.command()
+def mv(
+    src: Annotated[Path, typer.Argument(help="Source file path.")],
+    dst: Annotated[Path, typer.Argument(help="Destination file path or directory.")],
+    force: Annotated[bool, typer.Option("-f", "--force", help="Overwrite target file and target sidecar if they exist.")] = False,
+) -> None:
+    """Move a file together with its sidecar. Fails if target file or target sidecar exists, unless ``-f``."""
+    import shutil
+    from automafile.metadata.sidecar import sidecar_path_for, update_relative_path
+
+    if not src.exists():
+        typer.echo(f"src not found: {src}", err=True)
+        raise typer.Exit(1)
+    if not src.is_file():
+        typer.echo(f"src is not a file: {src}", err=True)
+        raise typer.Exit(1)
+
+    target = dst / src.name if dst.exists() and dst.is_dir() else dst
+    if target.resolve() == src.resolve():
+        typer.echo(f"src and dst are the same: {src}", err=True)
+        raise typer.Exit(1)
+
+    src_sidecar = sidecar_path_for(src)
+    target_sidecar = sidecar_path_for(target)
+
+    if target.exists() and not force:
+        typer.echo(f"target exists: {target} (use -f to overwrite)", err=True)
+        raise typer.Exit(1)
+    if target_sidecar.exists() and not force:
+        typer.echo(f"target sidecar exists: {target_sidecar} (use -f to overwrite)", err=True)
+        raise typer.Exit(1)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    log.info("CLI: mv %s -> %s (force=%s)", src, target, force)
+    shutil.move(str(src), str(target))
+    if src_sidecar.exists():
+        update_relative_path(src, target)
+    typer.echo(f"moved: {target}")
 
 
 @app.command()

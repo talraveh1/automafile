@@ -13,16 +13,19 @@ class ExtractedDoc:
 
     path: Path
     text: str = ""
-    native_metadata: dict[str, Any] = field(default_factory=dict)
     ocr_used: bool = False
     ocr_decision: str = "no_ocr"
     ocr_pages: list[int] | None = None
     format: str = "unknown"
-    supports_native_metadata: bool = False
     error: str | None = None
     # PDF only: per-page character counts from the text-layer pass; lets the
     # OCR decision reuse extract()'s parse instead of opening the PDF a second time
     per_page_chars: list[int] | None = None
+    # Flat key-value dict of metadata the file itself declares (PDF DocInfo +
+    # XMP, OOXML core properties, EXIF, HTML <meta>, EPUB Dublin Core, ...).
+    # Cleaned and length-clipped by ``extractors._meta.collect``. Surfaced to
+    # the LLM as soft context.
+    extracted_metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def has_text(self) -> bool:

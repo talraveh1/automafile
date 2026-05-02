@@ -5,7 +5,7 @@
 ## Things specific to this repo, beyond the global rules
 
 - **Single-orchestrator pattern**: per-file processing always goes through `automafile.pipeline.process_file`. New entry points (CLI commands, tests, watcher events) should call it, not reimplement the extract → ocr → llm → write sequence.
-- **Native + sidecar coexistence**: when a format supports native metadata, write it AND a sidecar. The sidecar is the source of truth for `/triage`; the native metadata is for downstream tooling.
+- **Sidecars are the only metadata store**: every file gets a `<dir>/.meta/<filename>.md` sidecar; original documents are read-only to the pipeline. Don't reintroduce a native-metadata writer — the previous one was removed because it duplicated data, mutated user files, and made `python-docx`/`python-pptx` writes silent no-ops.
 - **Tiered LLM parser must never raise**: `automafile.llm.parse_with_tiers` always returns an `EnrichmentResult`. The placeholder tier (`tier="placeholder"`) is the explicit fallback for unparseable LLM output. Don't add a sixth tier that throws.
-- **mtime preservation is non-negotiable**: every native metadata writer wraps its work in `metadata.mtime.preserve_times(path)`. New format writers must do the same. The `tests/test_native_metadata.py` suite enforces this with `snapshot()` comparisons.
+- **Moves carry the sidecar**: any code path that relocates a file must also move its `.meta/<name>.md` (use `metadata.sidecar.update_relative_path` or go through the `automafile mv` / `filer-apply` CLI). Never call `shutil.move` on a sidecar-bearing file without it.
 - **Hash identity**: `sha256:<hex>` (with prefix) is the canonical content identity used by reconcile and orphan detection. Use `metadata.hashing.hash_file`; don't roll your own.

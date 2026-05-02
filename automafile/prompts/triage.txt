@@ -28,7 +28,16 @@ Output schema (all keys required, ordering as shown):
 Taxonomy categories (use exactly one of these strings for `category`):
 {taxonomy}
 
-Hints from the file system (treat as soft context, not authority):
+Context: a few filesystem facts plus all metadata fields the file itself
+declares (Office core/custom properties, PDF DocInfo + XMP, EXIF — including
+GPS and date-taken, HTML <meta>, EPUB Dublin Core, etc.). Field names follow
+each format's natural conventions (``core_*`` for Office, ``info_*`` and
+``dc:*`` / ``xmp:*`` / ``pdf:*`` for PDFs, ``exif_*`` for images,
+``meta_*`` for HTML, ``dc_*`` for EPUB). Values can be missing, partial, or
+stale — treat as soft context, not authority. Use them when they clearly
+help (a populated ``core_creator`` is a strong correspondent signal; an
+``exif_DateTimeOriginal`` is a strong date signal); ignore when they don't.
+
 {hints}
 
 Document excerpt (may be partial, OCR'd, or noisy):

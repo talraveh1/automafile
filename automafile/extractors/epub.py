@@ -3,8 +3,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
+from automafile.extractors._meta import collect
 from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+
+
+# Full Dublin Core element set (the EPUB spec recommends these).
+_DC_FIELDS = (
+    "title", "creator", "subject", "description", "publisher",
+    "contributor", "date", "type", "format", "identifier",
+    "source", "language", "relation", "coverage", "rights",
+)
 
 
 def extract(path: Path) -> ExtractedDoc:
@@ -26,20 +36,29 @@ def extract(path: Path) -> ExtractedDoc:
             tag.decompose()
         chunks.append(soup.get_text(separator="\n").strip())
 
-    metadata: dict = {}
-    try:
-        for ns_key in ("DC",):
-            for k in ("title", "creator", "subject", "description", "language"):
-                vals = book.get_metadata(ns_key, k) if hasattr(book, "get_metadata") else []
-                if vals:
-                    metadata[k] = vals[0][0]
-    except Exception:
-        pass
+    raw: dict[str, Any] = {}
+    if hasattr(book, "get_metadata"):
+        for field_name in _DC_FIELDS:
+            try:
+                vals = book.get_metadata("DC", field_name) or []
+            except Exception:
+                vals = []
+            if not vals:
+                continue
+            # ebooklib returns a list of (value, attribs) tuples; flatten to
+            # values only, preserving multiple authors/subjects/etc.
+            extracted: list[str] = []
+            for entry in vals:
+                v = entry[0] if isinstance(entry, tuple) else entry
+                if v:
+                    extracted.append(str(v))
+            if not extracted:
+                continue
+            raw[field_name] = extracted if len(extracted) > 1 else extracted[0]
 
     return ExtractedDoc(
         path=path,
         text="\n\n".join(chunks),
-        native_metadata=metadata,
         format="epub",
-        supports_native_metadata=False,
+        extracted_metadata=collect(raw, prefix="dc_"),
     )

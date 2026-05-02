@@ -188,11 +188,11 @@ def run_scan(documents_root: Path | None = None, subpath: Path | None = None) ->
 
         # metadata?
         doc, summary_body, _ = sidecar_read(path)
-        if doc is None and not _has_native_metadata(path):
+        if doc is None:
             wl.files_needing_metadata.append({
                 "relative_path": _rel(path),
                 "format": ext.lstrip("."),
-                "reason": "no_metadata_present",
+                "reason": "no_sidecar",
             })
             continue
         if doc is not None:
@@ -257,28 +257,7 @@ def run_scan(documents_root: Path | None = None, subpath: Path | None = None) ->
 
 
 def _has_metadata(path: Path) -> bool:
-    if sidecar_path_for(path).exists():
-        return True
-    return _has_native_metadata(path)
-
-
-def _has_native_metadata(path: Path) -> bool:
-    try:
-        from automafile.metadata.native import read_native, supports
-    except ImportError:
-        return False
-    if not supports(path):
-        return False
-    try:
-        meta = read_native(path)
-        # consider "has native" if at least one of these keys is present and non-empty
-        for k in ("Title", "Subject", "Keywords", "title", "subject", "keywords",
-                  "dc:title", "dc:description", "dc:subject"):
-            if meta.get(k):
-                return True
-    except Exception:
-        return False
-    return False
+    return sidecar_path_for(path).exists()
 
 
 _BUCKET_KEYS: dict[str, str] = {

@@ -48,14 +48,23 @@ as `files_needing_metadata`, `files_with_partial_metadata`, or
 
 ## For each document
 
-1. Read its current sidecar (`<dir>/.meta/<name>.<ext>.md`) or, for native
-   formats, the existing native metadata via `python -m automafile process
-   <path> --dry-run` (which extracts but writes nothing).
+1. Read its sidecar metadata via `python -m automafile inspect <path>` —
+   prints JSON for the file (or for the whole inbox when called with no
+   path). Sidecars are the only source of truth; every file the pipeline
+   has touched has one.
 2. If the summary is present and ≥100 chars, use it.
 3. Otherwise run `python -m automafile process <path>` to generate it
    in-place.
 4. If the summary is still empty/unusable, ask the user what the document is
    about via `AskUserQuestion`.
+
+`process` over a worklist (`python -m automafile process` with no path, or
+`process <scan-*.json>`) marks each successfully-processed entry with a
+``processed`` ISO timestamp and rewrites the worklist atomically (flush +
+fsync + rename) after every file. Subsequent runs skip entries whose
+``processed`` mark is at-or-after the file's current mtime. Pass
+``--force`` to redo everything regardless. Failed files are not marked
+and will be retried on the next run.
 
 ## Decide filing
 
@@ -81,9 +90,21 @@ Otherwise, ask the user via `AskUserQuestion`.
 
 ## Apply
 
-Use `python -m automafile filer-apply --path <path> --category <c>
-[--subcategory <s>] --name <smart>` to perform the move. The CLI handles the
-sidecar move, mtime preservation, and native-metadata refresh.
+Two ways to perform the move, depending on how much logic you want the CLI
+to own:
+
+- **Category-based**: `python -m automafile filer-apply --path <path>
+  --category <c> [--subcategory <s>] --name <smart>` — composes the target
+  path under `<documents_root>/<category>[/<subcategory>]/<name>`,
+  refreshes sidecar fields (`category`, `subcategory`, `filed_at`,
+  `filed_path`, `metadata_modified`) after the move.
+- **Direct**: `python -m automafile mv <src> <dst> [-f]` — moves the file
+  and its sidecar together. Fails if either target exists, unless `-f`.
+  Use this for ad-hoc relocations where you've already computed the
+  destination path.
+
+Never `mv` / `move` a file directly with the OS — the sidecar will be left
+behind. Always go through one of the above.
 
 ## Cluster + propose new categories
 

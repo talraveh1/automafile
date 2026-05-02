@@ -10,12 +10,6 @@ from pathlib import Path
 from automafile.config import get_settings
 from automafile.log import get_logger
 from automafile.metadata.hashing import hash_file
-from automafile.metadata.native import (
-    NativeMetadataError,
-    read_native,
-    supports as native_supports,
-    write as native_write,
-)
 from automafile.metadata.schema import utc_now_iso
 from automafile.metadata.sidecar import (
     read as sidecar_read,
@@ -132,30 +126,17 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
 def _post_move_metadata(target: Path, proposal: FilingProposal) -> None:
     settings = get_settings()
     doc, summary, notes = sidecar_read(target)
-    if doc is not None:
-        try:
-            rel = str(target.relative_to(settings.documents_root)).replace("\\", "/")
-        except ValueError:
-            rel = str(target).replace("\\", "/")
-        doc.relative_path = rel
-        doc.category = proposal.category
-        if proposal.subcategory:
-            doc.subcategory = proposal.subcategory
-        doc.filed_at = utc_now_iso()
-        doc.filed_path = rel
-        doc.metadata_modified = utc_now_iso()
-        sidecar_write(target, doc, summary, notes)
-        if native_supports(target):
-            try:
-                native_write(target, {
-                    "category": doc.category,
-                    "subcategory": doc.subcategory,
-                    "title": doc.title,
-                    "summary": summary,
-                    "tags": list(doc.tags),
-                    "correspondent": doc.correspondent,
-                    "date": doc.date,
-                    "confidence": doc.confidence,
-                })
-            except NativeMetadataError as exc:
-                log.warning("Filed but native metadata refresh failed: %s", exc)
+    if doc is None:
+        return
+    try:
+        rel = str(target.relative_to(settings.documents_root)).replace("\\", "/")
+    except ValueError:
+        rel = str(target).replace("\\", "/")
+    doc.relative_path = rel
+    doc.category = proposal.category
+    if proposal.subcategory:
+        doc.subcategory = proposal.subcategory
+    doc.filed_at = utc_now_iso()
+    doc.filed_path = rel
+    doc.metadata_modified = utc_now_iso()
+    sidecar_write(target, doc, summary, notes)

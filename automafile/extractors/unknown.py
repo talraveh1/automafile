@@ -20,5 +20,4 @@ def extract(path: Path) -> ExtractedDoc:
         path=path,
         text=text,
         format="unknown",
-        supports_native_metadata=False,
     )

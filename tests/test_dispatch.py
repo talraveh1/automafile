@@ -47,7 +47,6 @@ def test_text_extractor_reads_utf8(tmp_path):
     doc = text_ext.extract(p)
     assert doc.text == body
     assert doc.format == "text"
-    assert doc.supports_native_metadata is False
 
 
 def test_unknown_extension_falls_back(tmp_path):
