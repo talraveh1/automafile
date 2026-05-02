@@ -103,7 +103,6 @@ def _write_pdf(file_path: Path, fields: dict[str, Any]) -> None:
                 xmp[f"{XMP_PREFIX}:DocumentDate"] = str(document_date)
             if confidence:
                 xmp[f"{XMP_PREFIX}:Confidence"] = str(confidence)
-            xmp["xmp:MetadataDate"] = _utc_iso()
 
         if pdf.docinfo is None:
             pdf.docinfo = pikepdf.Dictionary()
