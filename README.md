@@ -9,6 +9,12 @@ a hidden `.meta/` subfolder otherwise. A separate Claude Code skill named
 
 ## Quickstart
 
+There are two ways to run Automafile: **native** (a venv on the host) or
+**containerized** (Docker / Podman). Native is simpler; containerized
+sandboxes the agent away from the rest of the host filesystem.
+
+### Native
+
 ```powershell
 # from a fresh clone, with system Python 3.12+ on PATH
 python scripts\install.py
@@ -20,17 +26,42 @@ python scripts\install.py
 .\.venv\Scripts\python.exe -m automafile watch
 ```
 
+### Containerized (Docker Desktop, Podman Desktop, or any Compose-compatible runtime)
+
+```powershell
+# copy the example compose file and edit the documents bind-mount path inside it
+copy compose.example.yml compose.yml
+notepad compose.yml
+
+# build the image and start the watcher in the background
+docker compose up -d --build
+
+# follow the logs
+docker compose logs -f
+
+# stop the watcher
+docker compose down
+```
+
+The container talks to the host's Ollama via `host.docker.internal:11434`
+and bind-mounts only the project workspace and the documents folder —
+nothing else from the host is reachable.
+
 ### Prerequisites
 
 - Windows 11.
-- **Python 3.12+** on PATH (`python --version`).
-- [Ollama](https://ollama.com/download) running locally with the
-  `aya-expanse:8b` model: `ollama pull aya-expanse:8b`.
-- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) with the
-  `heb` and `eng` language packs.
+- **Native**: Python 3.12+ on PATH; Tesseract OCR (heb+eng); Ollama.
+- **Containerized**: a Compose-compatible runtime (Docker Desktop or Podman
+  Desktop); Ollama running on the host.
 
-Run `python -m automafile doctor` after install to verify everything is
-reachable.
+Run `python -m automafile doctor` (native) or `docker compose run --rm
+automafile python -m automafile doctor` (container) after install to verify
+everything is reachable.
+
+> **Git Bash gotcha**: when invoking the container CLI from MSYS-based
+> shells (Git Bash), absolute Linux-style paths like `/docs/Inbox/file.txt`
+> get rewritten to `C:/Program Files/Git/docs/...`. Use `//docs/...` (double
+> slash) or run from PowerShell / `docker compose exec` instead.
 
 ## Configuration
 
@@ -62,6 +93,10 @@ and the **`documents_root`** you configure. It never reaches outside.
 <repo>/
 ├── config.jsonc                     # local config (gitignored)
 ├── config.example.jsonc             # template
+├── compose.yml                      # local Compose file (gitignored)
+├── compose.example.yml              # Compose template
+├── Dockerfile                       # container build recipe
+├── .devcontainer/                   # VS Code Dev Containers config
 ├── architecture.md                  # data-flow diagram
 ├── automafile/                      # the Python package
 ├── tests/                           # pytest
@@ -86,8 +121,13 @@ relying on the watcher. Sidecars are regular Markdown files in a hidden
 
 ## What it doesn't do
 
-No Docker (yet), no Paperless, no Tika, no Postgres, no JVM, no web UI, no
-HTTP listener. The interface is the CLI and the Claude Code `/triage` skill.
+No Paperless, no Tika, no Postgres, no JVM, no web UI, no HTTP listener.
+The interface is the CLI and the Claude Code `/triage` skill.
+
+In containerized mode, the Windows toast notifier is replaced by stdout
+logs. Headless containers have no notification center to surface toasts to;
+adding a host-side bridge isn't worth the cognitive cost for a personal
+project.
 
 See [plan.md](plan.md) for the full design and [architecture.md](architecture.md)
 for the data-flow diagram.

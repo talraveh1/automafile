@@ -1,0 +1,21 @@
+# exclude artifacts that don't belong in the build context
+.venv/
+build/
+storage/
+memory/
+.git/
+.gitignore
+.pytest_cache/
+.serena/
+.claude/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# editor + OS noise
+.vscode/
+.idea/
+Thumbs.db
+
+# the full README + plan are not needed in the image
+plan.md

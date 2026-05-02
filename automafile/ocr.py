@@ -29,7 +29,10 @@ class OcrDecision:
 
 def _resolve_tesseract_bin() -> str | None:
     settings = get_settings()
-    if settings.tesseract_bin:
+    # honor the configured path only if it actually exists; otherwise fall
+    # through (this matters when running the host's config.jsonc inside a
+    # Linux container where the Windows-style path is invalid)
+    if settings.tesseract_bin and Path(settings.tesseract_bin).exists():
         return settings.tesseract_bin
     found = shutil.which("tesseract")
     if found:
@@ -53,7 +56,7 @@ def _configure_pytesseract() -> str | None:
         except ImportError:
             return None
     tessdata = get_settings().tessdata_prefix or os.environ.get("TESSDATA_PREFIX")
-    if tessdata:
+    if tessdata and Path(tessdata).exists():
         os.environ["TESSDATA_PREFIX"] = tessdata
     return bin_path
 

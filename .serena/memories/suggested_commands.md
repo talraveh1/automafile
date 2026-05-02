@@ -34,6 +34,19 @@ None configured. If you add one, declare it in `pyproject.toml` and document it 
 2. If you touched `config.py`, `ocr.py`, or `llm.py`: run `python -m automafile doctor`.
 3. If you touched extractors or metadata writers: drop a representative file into a temp inbox (set `DOCUMENTS_ROOT` env var or edit `config.jsonc`) and run `python -m automafile process <path>` end-to-end.
 
+### Container commands
+
+```powershell
+docker compose up -d --build           # build image + start watcher
+docker compose logs -f                 # follow logs
+docker compose exec automafile bash    # interactive shell inside the container
+docker compose run --rm automafile python -m automafile doctor   # one-shot
+docker compose down                    # stop
+docker compose down -v && docker compose up -d --build   # factory reset
+```
+
+**Git Bash gotcha**: absolute Linux paths like `/docs/Inbox/file.txt` get rewritten to `C:/Program Files/Git/docs/...` by MSYS path conversion. Use `//docs/...` or run from PowerShell.
+
 ### Test isolation
 
 Tests use env-var overrides (`DOCUMENTS_ROOT`, `INBOX_DIR`, `LOG_LEVEL`) on top of `config.jsonc`. The `isolated_env` fixture in `tests/conftest.py` sets them and calls `reset_settings()`.

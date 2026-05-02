@@ -1,0 +1,25 @@
+{
+  "name": "automafile",
+  "build": {
+    "dockerfile": "../Dockerfile"
+  },
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "mounts": [
+    "source=${localEnv:AUTOMAFILE_DOCS:C:/Users/trax7/OneDrive/Documents},target=/docs,type=bind"
+  ],
+  "containerEnv": {
+    "DOCUMENTS_ROOT": "/docs",
+    "OLLAMA_URL": "http://host.docker.internal:11434"
+  },
+  "runArgs": ["--add-host=host.docker.internal:host-gateway"],
+  "remoteUser": "automafile",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.debugpy"
+      ]
+    }
+  }
+}

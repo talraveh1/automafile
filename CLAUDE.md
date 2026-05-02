@@ -19,6 +19,15 @@ OCR when needed, calls Ollama for enrichment, and writes metadata into the
 file (native) or a `.meta/<filename>.md` sidecar. The `/triage` skill
 decides where each file is filed.
 
+## Run modes
+
+The project runs either natively (a venv on the host, via
+`scripts/install.py`) or containerized (Docker / Podman, via the included
+`Dockerfile` + `compose.yml`). Both share the same package; container mode
+bind-mounts the documents folder to `/docs`, sets `DOCUMENTS_ROOT=/docs`,
+and reaches host Ollama via `host.docker.internal`. Toasts are silently
+dropped in container mode (no host notification bridge).
+
 ## Skill scope
 
 `/triage` at `.claude/skills/triage/` is project-scoped — it knows about this

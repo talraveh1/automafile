@@ -1,0 +1,29 @@
+# Compose configuration for Automafile.
+# Copy this file to compose.yml and edit the documents bind-mount path.
+# Works under Docker Desktop, Podman Desktop, or any Compose-compatible runtime.
+
+services:
+  automafile:
+    build: .
+    image: automafile:latest
+    container_name: automafile
+    restart: unless-stopped
+
+    environment:
+      DOCUMENTS_ROOT: /docs
+      OLLAMA_URL: http://host.docker.internal:11434
+      LOG_LEVEL: INFO
+
+    volumes:
+      # the project workspace — code lives on the host, runs in the container
+      - .:/workspace
+
+      # the user's documents tree — REPLACE the host path with yours
+      - "C:/Users/<you>/OneDrive/Documents:/docs"
+
+    # makes Ollama on the host reachable from inside the container
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    working_dir: /workspace
+    command: ["python", "-m", "automafile", "watch"]
