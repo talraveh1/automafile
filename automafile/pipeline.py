@@ -49,7 +49,7 @@ def _decide_ocr(doc: ExtractedDoc) -> OcrDecision:
     if doc.format == "image":
         return OcrDecision(action="ocr_full", reason="image_format")
     if doc.format == "pdf":
-        return pdf_ocr_decision(doc.path)
+        return pdf_ocr_decision(doc.path, per_page_chars=doc.per_page_chars)
     return OcrDecision(action="no_ocr")
 
 
@@ -93,7 +93,6 @@ def _hints_for(doc: ExtractedDoc) -> dict:
 
 def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -> ProcessResult:
     started = time.perf_counter()
-    settings = get_settings()
     result = ProcessResult(path=path)
 
     if not path.exists() or not path.is_file():
@@ -113,7 +112,7 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         return result
 
     decision = _decide_ocr(doc)
-    if force_ocr and decision.action in {"no_ocr"}:
+    if force_ocr and decision.action == "no_ocr":
         decision = OcrDecision(action="ocr_full", reason="forced")
     result.ocr_decision = decision.action
     doc, ocr_block = _maybe_run_ocr(doc, decision)
@@ -133,7 +132,7 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
     wrote_native = False
     if doc.supports_native_metadata and native_meta.supports(path):
         try:
-            native_meta.write(path, {**enrichment_dict, "summary": enrichment.summary})
+            native_meta.write(path, enrichment_dict)
             wrote_native = True
             result.metadata_target = "native"
         except native_meta.NativeMetadataError as exc:
@@ -141,7 +140,7 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
 
     meta_doc = sidecar.build_meta_doc_for_new_file(
         path,
-        {**enrichment_dict, "summary": enrichment.summary},
+        enrichment_dict,
         ocr_block=ocr_block.model_dump(),
     )
     if not wrote_native:

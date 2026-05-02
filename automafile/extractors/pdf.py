@@ -66,6 +66,7 @@ def extract(path: Path) -> ExtractedDoc:
         raise EncryptedDocumentError(f"PDF is encrypted: {path}")
 
     text = ""
+    per_page_chars: list[int] = []
     try:
         from pypdf import PdfReader
         reader = PdfReader(str(path))
@@ -74,9 +75,11 @@ def extract(path: Path) -> ExtractedDoc:
         chunks: list[str] = []
         for page in reader.pages:
             try:
-                chunks.append(page.extract_text() or "")
+                page_text = page.extract_text() or ""
             except Exception:
-                chunks.append("")
+                page_text = ""
+            chunks.append(page_text)
+            per_page_chars.append(len(page_text.strip()))
         text = "\n".join(chunks)
     except EncryptedDocumentError:
         raise
@@ -89,6 +92,7 @@ def extract(path: Path) -> ExtractedDoc:
         native_metadata=metadata,
         format="pdf",
         supports_native_metadata=True,
+        per_page_chars=per_page_chars,
     )
 
 

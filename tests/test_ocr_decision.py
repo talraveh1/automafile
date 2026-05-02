@@ -69,3 +69,49 @@ def test_pdf_with_no_text_layer_full_ocr(tmp_path):
     decision = pdf_ocr_decision(pdf_path)
     assert decision.action == "ocr_full"
     assert "no_text_layer" in decision.reason
+
+
+def test_decision_with_supplied_per_page_chars_skips_pdf_parse(tmp_path):
+    """When per_page_chars is supplied, the decision skips its own pypdf parse."""
+    fake_path = tmp_path / "does-not-exist.pdf"
+    # this would raise if pdf_ocr_decision tried to open the file
+    decision = pdf_ocr_decision(fake_path, per_page_chars=[1000, 1000, 1000])
+    assert decision.action == "no_ocr"
+
+
+def test_sparse_pages_branch():
+    """Most pages have text, a couple don't — flag those for partial OCR."""
+    from pathlib import Path
+    chars = [800, 800, 0, 800, 800, 800, 800, 800, 800, 800]  # 1 sparse out of 10
+    decision = pdf_ocr_decision(Path("/dev/null"), per_page_chars=chars)
+    assert decision.action == "ocr_pages"
+    assert decision.pages == [2]
+
+
+def test_majority_sparse_falls_back_to_full():
+    from pathlib import Path
+    chars = [0, 0, 0, 0, 800, 800]  # 4 sparse out of 6 — exceeds default 0.3 ratio
+    decision = pdf_ocr_decision(Path("/dev/null"), per_page_chars=chars)
+    assert decision.action == "ocr_full"
+    assert decision.reason == "majority_sparse"
+
+
+def test_skip_encrypted(tmp_path):
+    import pikepdf
+    pdf_path = tmp_path / "secret.pdf"
+    pdf = pikepdf.new()
+    pdf.add_blank_page(page_size=(612, 792))
+    pdf.save(pdf_path, encryption=pikepdf.Encryption(owner="o", user="u"))
+    decision = pdf_ocr_decision(pdf_path)
+    assert decision.action == "skip_encrypted"
+
+
+def test_coalesce_page_ranges():
+    from automafile.ocr import _coalesce_page_ranges
+    # zero-based input → one-based (first, last) pairs
+    assert _coalesce_page_ranges([]) == []
+    assert _coalesce_page_ranges([0]) == [(1, 1)]
+    assert _coalesce_page_ranges([0, 1, 2]) == [(1, 3)]
+    assert _coalesce_page_ranges([0, 2, 3, 5]) == [(1, 1), (3, 4), (6, 6)]
+    # unsorted + duplicates
+    assert _coalesce_page_ranges([5, 0, 2, 3, 0]) == [(1, 1), (3, 4), (6, 6)]

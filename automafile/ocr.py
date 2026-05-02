@@ -104,37 +104,68 @@ def tesseract_languages() -> list[str]:
         return []
 
 
-def pdf_ocr_decision(path: Path) -> OcrDecision:
-    """Decide whether a PDF needs OCR and over which pages."""
+def pdf_ocr_decision(path: Path, per_page_chars: list[int] | None = None) -> OcrDecision:
+    """Decide whether a PDF needs OCR and over which pages.
+
+    If ``per_page_chars`` is supplied (typically from ``extractors.pdf.extract``),
+    we skip our own pypdf parse — the extractor already did it.
+    """
     settings = get_settings()
-    try:
-        from pypdf import PdfReader
-        reader = PdfReader(str(path))
-    except Exception as exc:  # noqa: BLE001
-        if "encrypt" in str(exc).lower():
-            return OcrDecision(action="skip_encrypted", reason="pdf_encrypted")
-        return OcrDecision(action="ocr_full", reason=f"pypdf_failed: {exc}")
-    if reader.is_encrypted:
-        return OcrDecision(action="skip_encrypted", reason="pdf_encrypted")
-
-    per_page: list[int] = []
-    for page in reader.pages:
+    if per_page_chars is None:
+        # use pikepdf as the encryption oracle — its PasswordError is
+        # unambiguous, unlike pypdf which raises DependencyError when it can't
+        # verify AES keys without the `cryptography` package
         try:
-            t = page.extract_text() or ""
-        except Exception:
-            t = ""
-        per_page.append(len(t.strip()))
+            import pikepdf
+            with pikepdf.open(path):
+                pass
+        except pikepdf.PasswordError:
+            return OcrDecision(action="skip_encrypted", reason="pdf_encrypted")
+        except Exception:  # noqa: BLE001
+            pass
 
-    total = sum(per_page)
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(str(path))
+        except Exception as exc:  # noqa: BLE001
+            return OcrDecision(action="ocr_full", reason=f"pypdf_failed: {exc}")
+        per_page_chars = []
+        for page in reader.pages:
+            try:
+                t = page.extract_text() or ""
+            except Exception:
+                t = ""
+            per_page_chars.append(len(t.strip()))
+
+    total = sum(per_page_chars)
     if total < settings.ocr_min_text_chars:
         return OcrDecision(action="ocr_full", reason="no_text_layer")
 
-    sparse = [i for i, c in enumerate(per_page) if c < settings.ocr_min_page_chars]
+    sparse = [i for i, c in enumerate(per_page_chars) if c < settings.ocr_min_page_chars]
     if not sparse:
         return OcrDecision(action="no_ocr")
-    if len(sparse) <= max(1, int(len(per_page) * settings.ocr_sparse_page_ratio)):
+    if len(sparse) <= max(1, int(len(per_page_chars) * settings.ocr_sparse_page_ratio)):
         return OcrDecision(action="ocr_pages", pages=sparse, reason="sparse_pages")
     return OcrDecision(action="ocr_full", reason="majority_sparse")
+
+
+def _coalesce_page_ranges(zero_based_pages: list[int]) -> list[tuple[int, int]]:
+    """Collapse a sorted page-index list into ``(first_one_based, last_one_based)`` runs."""
+    if not zero_based_pages:
+        return []
+    pages = sorted(set(zero_based_pages))
+    runs: list[tuple[int, int]] = []
+    run_start = pages[0]
+    prev = run_start
+    for p in pages[1:]:
+        if p == prev + 1:
+            prev = p
+            continue
+        runs.append((run_start + 1, prev + 1))
+        run_start = p
+        prev = p
+    runs.append((run_start + 1, prev + 1))
+    return runs
 
 
 def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None) -> str:
@@ -165,13 +196,15 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
         except ImportError as exc:
             raise RuntimeError("pdf2image is not installed") from exc
         if pages:
+            # coalesce contiguous page indices into ranges so poppler is invoked
+            # once per run of pages instead of once per page
             chunks: list[str] = []
-            for one_based_page in (p + 1 for p in pages):
+            for first_one_based, last_one_based in _coalesce_page_ranges(pages):
                 imgs = convert_from_path(
                     str(path),
                     dpi=200,
-                    first_page=one_based_page,
-                    last_page=one_based_page,
+                    first_page=first_one_based,
+                    last_page=last_one_based,
                 )
                 for img in imgs:
                     chunks.append(pytesseract.image_to_string(img, lang=langs))

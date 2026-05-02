@@ -20,6 +20,9 @@ class ExtractedDoc:
     format: str = "unknown"
     supports_native_metadata: bool = False
     error: str | None = None
+    # PDF only: per-page character counts from the text-layer pass; lets the
+    # OCR decision reuse extract()'s parse instead of opening the PDF a second time
+    per_page_chars: list[int] | None = None
 
     @property
     def has_text(self) -> bool:
