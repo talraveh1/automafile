@@ -18,9 +18,10 @@ flowchart LR
       direction TB
       llm["<b>LLM</b> · Ollama<br/><i>tiered JSON parse</i>"]:::ai
       writers["<b>Sidecar Writer</b><br/><i>.meta/&lt;name&gt;.md</i>"]:::write
-      notifier["<b>Notifier</b><br/><i>Windows toast</i>"]:::notify
-      writers --> notifier
    end
+
+   events[("<b>events.jsonl</b><br/><i>storage/</i>")]:::journal
+   toaster["<b>Toaster</b><br/><i>host process<br/>cursor + compact</i>"]:::notify
 
    cli["<b>Triage CLI</b><br/><i>inspect · mv · filer-apply<br/>scan · review-ocr · reconcile</i>"]:::tool
    triage[/"🗂️ Triage skill"/]:::tool
@@ -29,18 +30,21 @@ flowchart LR
    pipeline --> dispatch --> extractors --> output
    pipeline --> ocr --> ocr_decision --> output
    llm --> writers
+   writers -->|append| events
+   events -->|tail| toaster
    triage <-.-> cli
    style extract fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#0f172a
    style output fill:#f5f3ff,stroke:#a78bfa,stroke-width:2px,color:#312e81
 
-   classDef source fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
-   classDef watch  fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#9a3412
-   classDef core   fill:#ede9fe,stroke:#8b5cf6,stroke-width:2px,color:#5b21b6
-   classDef stage  fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#164e63
-   classDef ai     fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
-   classDef write  fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#9d174d
-   classDef notify fill:#e0e7ff,stroke:#6366f1,stroke-width:2px,color:#3730a3
-   classDef tool   fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
+   classDef source  fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+   classDef watch   fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#9a3412
+   classDef core    fill:#ede9fe,stroke:#8b5cf6,stroke-width:2px,color:#5b21b6
+   classDef stage   fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#164e63
+   classDef ai      fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+   classDef write   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#9d174d
+   classDef journal fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+   classDef notify  fill:#e0e7ff,stroke:#6366f1,stroke-width:2px,color:#3730a3
+   classDef tool    fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
 ```
 
 ## Data flow
@@ -60,7 +64,28 @@ flowchart LR
    `<dir>/.meta/<filename>.md` via `metadata.sidecar.write`. The original
    document is never touched. The hidden `.meta/` folder rides along with
    the file in OneDrive sync.
-8. A debounced toast announces the change.
+8. The watcher appends a `processed` event to `storage/events.jsonl`
+   (sidecar quarantine appends `quarantined`). The pipeline never renders
+   notifications itself.
+
+## Toaster
+
+`automafile toaster` is a separate, long-running consumer of
+`storage/events.jsonl`. It tails the file with a 1 s poll, persists a
+byte offset to `storage/toaster.cursor` after every fired toast (so
+restarts never miss or duplicate), and renders Windows toasts via the
+debounced `Notifier` — bursts collapse into a single
+"Processed N files" toast within `_DEBOUNCE_SECONDS` (5 s).
+
+When the journal exceeds 1 MB *and* the cursor has caught up to EOF,
+the toaster truncates the file and resets the cursor to 0. Single
+consumer, so no coordination with the appender is required; the
+worst-case race (one event lost or duplicated within a millisecond) is
+acceptable for notification UX.
+
+This decoupling lets the pipeline run inside a container while the
+toaster runs on the host — the bind-mounted workspace is the only
+shared surface needed.
 
 ## Scanner
 
@@ -87,12 +112,14 @@ invocation and updates them when the user overrides a proposal.
 
 The pipeline is deployable two ways without code changes:
 
-- **Native venv** on Windows (host). Direct OS access; toast notifications
-  fire via `windows-toasts`.
+- **Native venv** on Windows (host). Direct OS access; the watcher and
+  toaster run as separate foreground processes.
 - **Linux container** (Docker / Podman). Bind-mounts `<documents_root>` to
   `/docs` and the project workspace to `/workspace`. Reaches the host's
-  Ollama via `host.docker.internal:11434`. Notifications fall back to
-  stdout (no headless-container notification bridge).
+  Ollama via `host.docker.internal:11434`. The toaster always runs on the
+  host regardless of mode — it tails `storage/events.jsonl` through the
+  bind-mounted workspace, so toasts surface natively even when the
+  pipeline is containerized.
 
 The choice is purely about isolation — the container variant exists so an
 agent (Claude Code or otherwise) running inside it cannot reach files

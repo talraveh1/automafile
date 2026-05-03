@@ -32,6 +32,7 @@ dependencies = [
   "requests>=2.32",
   "pydantic>=2.7",
   "windows-toasts>=1.1; platform_system=='Windows'",
+  "pystray>=0.19; platform_system=='Windows'",
 ]
 
 [project.optional-dependencies]

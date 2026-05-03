@@ -11,7 +11,7 @@ from watchdog.observers.polling import PollingObserver
 
 from automafile.config import get_settings
 from automafile.log import get_logger
-from automafile.notifier import notify
+from automafile.events import append as append_event
 from automafile.pipeline import format_result_line, process_file
 
 
@@ -59,7 +59,12 @@ class _InboxHandler(FileSystemEventHandler):
             result = process_file(path)
             log.info(format_result_line(result))
             if not result.error:
-                notify("Automafile", f"{path.name} → {result.category} ({result.metadata_target})")
+                append_event(
+                    "processed",
+                    file=path.name,
+                    category=result.category,
+                    target=result.metadata_target,
+                )
         except Exception as exc:  # noqa: BLE001
             log.exception("Unhandled error while processing %s: %s", path, exc)
         finally:

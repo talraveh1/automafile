@@ -575,6 +575,16 @@ def doctor() -> None:
         typer.echo(f"  model present : {ollama_has_model()}  ({settings.ollama_model})")
 
 
+@app.command()
+def toaster(
+    no_tray: Annotated[bool, typer.Option("--no-tray", help="Run headless (no tray icon). For debugging or pipes.")] = False,
+) -> None:
+    """Tail the events journal and fire Windows toasts. Run on the host."""
+    log.info("CLI: toaster (no_tray=%s)", no_tray)
+    from automafile.toaster import run_toaster
+    run_toaster(tray=not no_tray)
+
+
 @app.command("filer-apply")
 def filer_apply_cmd(
     path: Annotated[Path, typer.Argument(help="The file to file.")],

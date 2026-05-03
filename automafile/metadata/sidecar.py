@@ -127,13 +127,16 @@ def _quarantine(spath: Path, reason: str) -> None:
     except OSError as exc:
         log.error("Could not quarantine %s: %s", spath, exc)
         return
-    # best-effort notification — lazy import to avoid spinning up the toaster
-    # on cold paths and to dodge import cycles
+    # lazy import to dodge potential import cycles via config
     try:
-        from automafile.notifier import notify
-        notify("Sidecar quarantined", f"{spath.parent.parent.name}/{spath.name} ({reason})")
+        from automafile.events import append as append_event
+        append_event(
+            "quarantined",
+            file=f"{spath.parent.parent.name}/{spath.name}",
+            reason=reason,
+        )
     except Exception as exc:  # noqa: BLE001
-        log.debug("Notification failed for quarantine: %s", exc)
+        log.debug("Event append failed for quarantine: %s", exc)
 
 
 def is_quarantined(name: str) -> bool:

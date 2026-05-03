@@ -1,4 +1,9 @@
-"""Toast notification with debouncing; falls back to print."""
+"""Windows toast primitive with debouncing; falls back to stdout.
+
+Used only by ``automafile.toaster``. The pipeline never imports this
+directly — it appends to the events journal and the toaster process
+renders the toasts.
+"""
 
 from __future__ import annotations
 
@@ -72,17 +77,3 @@ class Notifier:
                 self._timer.cancel()
                 self._timer = None
         self._flush()
-
-
-_singleton: Notifier | None = None
-
-
-def notifier() -> Notifier:
-    global _singleton
-    if _singleton is None:
-        _singleton = Notifier()
-    return _singleton
-
-
-def notify(title: str, body: str) -> None:
-    notifier().notify(title, body)

@@ -24,6 +24,14 @@ python scripts\install.py
 
 # start the watcher
 .\.venv\Scripts\python.exe -m automafile watch
+
+# in a second terminal, start the toaster (renders Windows toasts from the events journal)
+.\.venv\Scripts\python.exe -m automafile toaster
+
+# optional: register the toaster as a Windows scheduled task that auto-starts at logon
+python scripts\toaster.py            # install / refresh
+python scripts\toaster.py --status   # show the entry
+python scripts\toaster.py --uninstall
 ```
 
 ### Containerized (Docker Desktop, Podman Desktop, or any Compose-compatible runtime)
@@ -42,6 +50,12 @@ docker compose logs -f
 # stop the watcher
 docker compose down
 ```
+
+The toaster always runs on the host (it's tiny, has no LLM/OCR dependencies,
+and needs the host's notification center). It tails
+`storage/events.jsonl` — which the containerized pipeline writes through
+the bind-mounted workspace — so toasts surface natively even when the
+pipeline lives inside the container.
 
 The container talks to the host's Ollama via `host.docker.internal:11434`
 and bind-mounts only the project workspace and the documents folder —
@@ -78,6 +92,7 @@ and the **`documents_root`** you configure. It never reaches outside.
 | Command | Purpose |
 | --- | --- |
 | `automafile watch` | Start the watcher in the foreground. |
+| `automafile toaster` | Tail the events journal and fire Windows toasts; hosts a tray icon (right-click → Triage / Log / Exit). `--no-tray` for headless. |
 | `automafile process <path>` | Process a single file once. |
 | `automafile ocr <path>` | Force OCR on a file. |
 | `automafile scan` | Walk the tree and emit a worklist. |
@@ -105,7 +120,9 @@ and the **`documents_root`** you configure. It never reaches outside.
 ├── storage/                         # gitignored, runtime
 │   ├── scan/                        # scan worklists + hash cache
 │   ├── logs/                        # rolling logs
-│   └── tessdata/                    # optional local Tesseract trainedata
+│   ├── tessdata/                    # optional local Tesseract trainedata
+│   ├── events.jsonl                 # append-only event journal (pipeline → toaster)
+│   └── toaster.cursor               # toaster's byte-offset bookmark into events.jsonl
 └── build/                           # gitignored: pytest cache, coverage data
 ```
 
@@ -123,11 +140,6 @@ relying on the watcher. Sidecars are regular Markdown files in a hidden
 
 No Paperless, no Tika, no Postgres, no JVM, no web UI, no HTTP listener.
 The interface is the CLI and the Claude Code `/triage` skill.
-
-In containerized mode, the Windows toast notifier is replaced by stdout
-logs. Headless containers have no notification center to surface toasts to;
-adding a host-side bridge isn't worth the cognitive cost for a personal
-project.
 
 See [plan.md](plan.md) for the full design and [architecture.md](architecture.md)
 for the data-flow diagram.

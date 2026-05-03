@@ -27,8 +27,10 @@ The project runs either natively (a venv on the host, via
 `scripts/install.py`) or containerized (Docker / Podman, via the included
 `Dockerfile` + `compose.yml`). Both share the same package; container mode
 bind-mounts the documents folder to `/docs`, sets `DOCUMENTS_ROOT=/docs`,
-and reaches host Ollama via `host.docker.internal`. Toasts are silently
-dropped in container mode (no host notification bridge).
+and reaches host Ollama via `host.docker.internal`. Toasts are decoupled
+from the pipeline: it appends events to `storage/events.jsonl`, and a
+separate `automafile toaster` process (always run on the host) tails the
+journal and renders Windows toasts.
 
 ## Skill scope
 
