@@ -60,6 +60,12 @@ def test_hebrew_quote_sanitization():
     assert HEBREW_GERSHAYIM in out
 
 
+def test_correspondent_list_is_flattened_to_string():
+    raw = '{"title":"paper","summary":"x","tags":[],"category":"Research","subcategory":null,"correspondent":["Ian Sommerville","Nuri Whitney","D.C. Schmidt"],"date":null,"amount":null,"currency":null,"language":"en","confidence":"high","needs_review":false,"reason":null}'
+    result = parse_with_tiers(raw)
+    assert result.correspondent == "Ian Sommerville, Nuri Whitney, D.C. Schmidt"
+
+
 def test_category_alias_medical_to_personal():
     raw = '{"title":"prescription","summary":"hi","tags":["rx"],"category":"medical","subcategory":null,"correspondent":null,"date":null,"amount":null,"currency":null,"language":"en","confidence":"medium","needs_review":false,"reason":null}'
     result = parse_with_tiers(raw)

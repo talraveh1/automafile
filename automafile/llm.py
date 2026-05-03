@@ -217,16 +217,26 @@ def _regex_recover(raw: str) -> dict | None:
     return out or None
 
 
+def _coerce_str_field(value: Any) -> str | None:
+    """Normalize an LLM string-valued field — flattens list outputs (e.g. multi-author)."""
+    if value in (None, "", "null"):
+        return None
+    if isinstance(value, list):
+        joined = ", ".join(str(v) for v in value if v not in (None, ""))
+        return joined or None
+    return str(value)
+
+
 def _coerce_to_result(parsed: dict, tier: str, raw: str) -> EnrichmentResult:
     if not isinstance(parsed, dict):
         parsed = {}
     res = EnrichmentResult(
-        title=parsed.get("title") or None,
+        title=_coerce_str_field(parsed.get("title")),
         summary=str(parsed.get("summary") or ""),
         tags=[str(t) for t in (parsed.get("tags") or []) if t],
         category=_category_alias(str(parsed.get("category") or "Unknown")),
-        subcategory=parsed.get("subcategory") or None,
-        correspondent=parsed.get("correspondent") or None,
+        subcategory=_coerce_str_field(parsed.get("subcategory")),
+        correspondent=_coerce_str_field(parsed.get("correspondent")),
         date=parsed.get("date") or None,
         amount=(float(parsed["amount"]) if parsed.get("amount") not in (None, "", "null") else None),
         currency=parsed.get("currency") or None,
