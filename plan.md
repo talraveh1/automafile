@@ -355,7 +355,7 @@ Each extractor:
   2. repair (escape unescaped `"` inside known string-valued keys: `title`, `summary`, `reason`)
   3. retry once with the prompt extended by "do not use double-quotes inside string values"
   4. per-field regex extraction (`"summary":"...escaped..."` etc.) — partial recovery
-  5. placeholder result with `category=unknown`, `confidence=low`, `needs_review=true` so the file still lands in the metadata, never disappears.
+  5. placeholder result with `category=unknown`, `confidence=low`, `review=true` so the file still lands in the metadata, never disappears.
 - Returns the tier label so the watcher can log it.
 
 ### `automafile/metadata/sidecar.py`

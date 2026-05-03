@@ -11,6 +11,7 @@ from typing import Any
 import requests
 
 from automafile.config import get_settings
+from automafile.extractors.base import ExtractedDoc, Section
 from automafile.log import get_logger
 
 
@@ -51,7 +52,7 @@ class EnrichmentResult:
     currency: str | None = None
     language: str = "unknown"
     confidence: str = "low"
-    needs_review: bool = True
+    review: bool = True
     reason: str | None = None
     tier: str = "unknown"
     raw_response: str = ""
@@ -69,7 +70,7 @@ class EnrichmentResult:
             "currency": self.currency,
             "language": self.language,
             "confidence": self.confidence,
-            "needs_review": self.needs_review,
+            "review": self.review,
             "reason": self.reason,
         }
 
@@ -109,10 +110,36 @@ def _category_alias(category: str) -> str:
     return aliases.get(key, category.strip())
 
 
-def _build_prompt(text: str, hints: dict, taxonomy: list[str]) -> str:
+def _section_header(section: Section, total_sections: int | None) -> str:
+    label = section.label or f"Section {section.index + 1}"
+    if total_sections is None:
+        return f"--- {label} ---"
+    if label.startswith(("Page ", "Slide ", "Chapter ")):
+        return f"--- {label} of {total_sections} ---"
+    return f"--- {label} ({section.index + 1} of {total_sections}) ---"
+
+
+def _render_sections(sections: list[Section], total_sections: int | None) -> str:
+    if not sections:
+        return ""
+    if total_sections is None and len(sections) == 1 and sections[0].label is None:
+        return sections[0].text
+
+    blocks = [
+        f"{_section_header(section, total_sections)}\n{section.text}"
+        for section in sections
+    ]
+    if total_sections is not None and len(sections) < total_sections:
+        first = sections[0].index + 1
+        last = sections[-1].index + 1
+        blocks.append(f"--- (showing pages {first}-{last} of {total_sections}) ---")
+    return "\n\n".join(blocks)
+
+
+def _build_prompt(doc: ExtractedDoc, hints: dict, taxonomy: list[str]) -> str:
     template_path = Path(__file__).parent / "prompts" / "triage.txt"
     template = template_path.read_text(encoding="utf-8")
-    safe_text = sanitize_excerpt(text or "")[:6000]
+    safe_text = sanitize_excerpt(_render_sections(doc.sections, doc.total_sections))
     hints_text = "\n".join(f"- {k}: {v}" for k, v in (hints or {}).items()) or "(none)"
     taxonomy_text = ", ".join(taxonomy) if taxonomy else "Financial, Legal, Research, Teaching, Personal, Media, Unknown"
     return (
@@ -186,7 +213,7 @@ _TAGS_RE = re.compile(r'"tags"\s*:\s*\[([^\]]*)\]')
 _DATE_RE = re.compile(r'"date"\s*:\s*"(\d{4}-\d{2}-\d{2})"')
 _AMOUNT_RE = re.compile(r'"amount"\s*:\s*([0-9]+(?:\.[0-9]+)?)')
 _CURRENCY_RE = re.compile(r'"currency"\s*:\s*"([A-Z]{3})"')
-_NEEDS_REVIEW_RE = re.compile(r'"needs_review"\s*:\s*(true|false)')
+_review_RE = re.compile(r'"review"\s*:\s*(true|false)')
 
 
 def _regex_recover(raw: str) -> dict | None:
@@ -211,9 +238,9 @@ def _regex_recover(raw: str) -> dict | None:
     currency_match = _CURRENCY_RE.search(raw)
     if currency_match:
         out["currency"] = currency_match.group(1)
-    nr_match = _NEEDS_REVIEW_RE.search(raw)
+    nr_match = _review_RE.search(raw)
     if nr_match:
-        out["needs_review"] = nr_match.group(1) == "true"
+        out["review"] = nr_match.group(1) == "true"
     return out or None
 
 
@@ -242,13 +269,13 @@ def _coerce_to_result(parsed: dict, tier: str, raw: str) -> EnrichmentResult:
         currency=parsed.get("currency") or None,
         language=str(parsed.get("language") or "unknown"),
         confidence=str(parsed.get("confidence") or "low"),
-        needs_review=bool(parsed.get("needs_review", True)),
+        review=bool(parsed.get("review", True)),
         reason=parsed.get("reason") or None,
         tier=tier,
         raw_response=raw,
     )
     if not res.summary:
-        res.needs_review = True
+        res.review = True
     return res
 
 
@@ -265,7 +292,7 @@ def _placeholder_result(raw: str) -> EnrichmentResult:
         currency=None,
         language="unknown",
         confidence="low",
-        needs_review=True,
+        review=True,
         reason="LLM output could not be parsed.",
         tier="placeholder",
         raw_response=raw,
@@ -309,11 +336,11 @@ def parse_with_tiers(raw: str, prompt_for_retry: str | None = None) -> Enrichmen
     return _placeholder_result(raw)
 
 
-def enrich(text: str, hints: dict | None = None, taxonomy: list[str] | None = None) -> EnrichmentResult:
+def enrich(doc: ExtractedDoc, hints: dict | None = None, taxonomy: list[str] | None = None) -> EnrichmentResult:
     """Send text to Ollama, parse with tiered fallback, return enrichment."""
     taxonomy = taxonomy or ["Financial", "Legal", "Research", "Teaching", "Personal", "Media", "Unknown"]
-    prompt = _build_prompt(text, hints or {}, taxonomy)
-    log.info("enrich: text=%dchars hints=%s", len(text or ""), sorted((hints or {}).keys()) or "[]")
+    prompt = _build_prompt(doc, hints or {}, taxonomy)
+    log.info("enrich: text=%dchars hints=%s", len(doc.text or ""), sorted((hints or {}).keys()) or "[]")
     try:
         raw = _ollama_generate(prompt)
     except Exception as exc:  # noqa: BLE001
@@ -321,8 +348,8 @@ def enrich(text: str, hints: dict | None = None, taxonomy: list[str] | None = No
         return _placeholder_result(f"<<error>> {exc}")
     result = parse_with_tiers(raw, prompt_for_retry=prompt)
     log.info(
-        "enrich done: tier=%s category=%s confidence=%s tags=%d needs_review=%s",
-        result.tier, result.category, result.confidence, len(result.tags), result.needs_review,
+        "enrich done: tier=%s category=%s confidence=%s tags=%d review=%s",
+        result.tier, result.category, result.confidence, len(result.tags), result.review,
     )
     return result
 

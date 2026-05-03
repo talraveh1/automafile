@@ -5,13 +5,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from automafile.config import get_settings
+from automafile.extractors._caps import CapConfig, select_pages
 from automafile.extractors._meta import collect
 from automafile.extractors.base import (
     CorruptDocumentError,
     EncryptedDocumentError,
     ExtractedDoc,
+    Section,
 )
+from automafile.log import get_logger
+from automafile.ocr import run_ocr, should_ocr_page, tesseract_available
 
+
+log = get_logger(__name__)
 
 _XMP_NS_PREFIX = {
     "http://purl.org/dc/elements/1.1/": "dc",
@@ -72,62 +79,74 @@ def _read_pdf_metadata(path: Path) -> tuple[dict[str, Any], bool]:
         raise CorruptDocumentError(f"pikepdf could not open {path}: {exc}") from exc
 
 
-def _per_page_chars(path: Path) -> list[int]:
-    try:
-        from pypdf import PdfReader
-    except ImportError:
-        return []
-    try:
-        reader = PdfReader(str(path))
-        if reader.is_encrypted:
-            return []
-        result = []
-        for page in reader.pages:
-            try:
-                t = page.extract_text() or ""
-            except Exception:
-                t = ""
-            result.append(len(t))
-        return result
-    except Exception:
-        return []
-
-
 def extract(path: Path) -> ExtractedDoc:
     metadata, encrypted = _read_pdf_metadata(path)
     if encrypted:
         raise EncryptedDocumentError(f"PDF is encrypted: {path}")
 
-    text = ""
-    per_page_chars: list[int] = []
     try:
         from pypdf import PdfReader
+
         reader = PdfReader(str(path))
         if reader.is_encrypted:
             raise EncryptedDocumentError(f"PDF is encrypted: {path}")
-        chunks: list[str] = []
-        for page in reader.pages:
-            try:
-                page_text = page.extract_text() or ""
-            except Exception:
-                page_text = ""
-            chunks.append(page_text)
-            per_page_chars.append(len(page_text.strip()))
-        text = "\n".join(chunks)
     except EncryptedDocumentError:
         raise
     except Exception as exc:  # noqa: BLE001
         raise CorruptDocumentError(f"pypdf failed for {path}: {exc}") from exc
 
+    settings = get_settings()
+    cfg = CapConfig.from_settings(settings)
+    text_layer_chars: list[int] = []
+    ocr_pages: list[int] = []
+    ocr_unavailable = False
+    ocr_failed = False
+
+    def _iter_pages():
+        nonlocal ocr_failed, ocr_unavailable
+        for page_index, page in enumerate(reader.pages):
+            try:
+                page_text = page.extract_text() or ""
+            except Exception:
+                page_text = ""
+            text_layer_chars.append(len(page_text.strip()))
+
+            section_text = page_text
+            if should_ocr_page(page_text):
+                if not tesseract_available():
+                    ocr_unavailable = True
+                else:
+                    try:
+                        section_text = run_ocr(path, langs=settings.tesseract_langs, pages=[page_index])
+                        ocr_pages.append(page_index)
+                    except Exception as exc:  # noqa: BLE001
+                        ocr_failed = True
+                        log.warning("OCR failed for %s page %d: %s", path, page_index + 1, exc)
+            yield section_text
+
+    kept = select_pages(_iter_pages(), cfg)
+    sections = [
+        Section(label=f"Page {i + 1}", text=text, index=i)
+        for i, text in enumerate(kept)
+    ]
+
+    if ocr_pages:
+        ocr_decision = "ocr_pages"
+    elif ocr_failed:
+        ocr_decision = "ocr_failed"
+    elif ocr_unavailable:
+        ocr_decision = "ocr_unavailable"
+    else:
+        ocr_decision = "no_ocr"
+
     return ExtractedDoc(
         path=path,
-        text=text,
+        sections=sections,
+        total_sections=len(reader.pages),
+        ocr_used=bool(ocr_pages),
+        ocr_decision=ocr_decision,
+        ocr_pages=ocr_pages or None,
         format="pdf",
-        per_page_chars=per_page_chars,
+        per_page_chars=text_layer_chars,
         extracted_metadata=metadata,
     )
-
-
-def per_page_char_counts(path: Path) -> list[int]:
-    """Public helper used by the OCR decision logic."""
-    return _per_page_chars(path)

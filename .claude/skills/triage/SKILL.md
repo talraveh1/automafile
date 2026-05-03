@@ -80,7 +80,7 @@ and will be retried on the next run.
 Auto-apply only when ALL hold:
 
 1. `confidence == high`.
-2. `needs_review == false`.
+2. `review == false`.
 3. The chosen category exists in `taxonomy.md`.
 4. The taxonomy hasn't been edited since the enrichment was generated
    (compare file mtime of `taxonomy.md` to `metadata_modified` in the

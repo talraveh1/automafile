@@ -43,7 +43,7 @@ class MetadataDoc(BaseModel):
     currency: str | None = None
     title: str | None = None
     confidence: str = "low"
-    needs_review: bool = True
+    review: bool = True
     ocr: OcrBlock = Field(default_factory=OcrBlock)
     metadata_modified: str = Field(default_factory=utc_now_iso)
     metadata_modified_by: str = "automafile-watcher 0.1.0"

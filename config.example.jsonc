@@ -40,5 +40,15 @@
   // PDF OCR-decision thresholds.
   "ocr_min_text_chars": 100,
   "ocr_min_page_chars": 50,
-  "ocr_sparse_page_ratio": 0.3
+  "ocr_sparse_page_ratio": 0.3,
+
+  // Extraction caps. Paginated formats read at least min_pages, at most
+  // max_pages, trim each page/sheet/slide, and stop early once target_chars
+  // have been collected.
+  "extraction": {
+    "min_pages": 3,
+    "max_pages": 5,
+    "per_page_chars": 1500,
+    "target_chars": 6000
+  }
 }

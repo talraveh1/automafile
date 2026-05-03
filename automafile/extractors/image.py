@@ -11,8 +11,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from automafile.config import get_settings
+from automafile.extractors._caps import CapConfig, select_pages
 from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
+from automafile.log import get_logger
+from automafile.ocr import ocr_image, tesseract_available
+
+
+log = get_logger(__name__)
 
 
 # EXIF sub-IFD tag IDs (PIL exposes these via Image.Exif.get_ifd)
@@ -69,15 +76,18 @@ def extract(path: Path) -> ExtractedDoc:
     except Exception:
         pass
 
+    settings = get_settings()
+    cfg = CapConfig.from_settings(settings)
     metadata: dict[str, Any] = {}
+    n_frames = 1
+    ocr_pages: list[int] = []
+    ocr_unavailable = False
+    ocr_failed = False
     try:
         with Image.open(path) as im:
-            # PIL info dict — PNG iTXt chunks (Title, Description, ...),
-            # JPEG comments, etc. Binary blobs (icc_profile, exif, XMP) are
-            # filtered out by ``collect``'s skip-list and value rules.
+            n_frames = int(getattr(im, "n_frames", 1) or 1)
             info = getattr(im, "info", {}) or {}
             metadata.update(collect(info, prefix="info_"))
-            # Image basics — Windows 11 surfaces dimensions and color mode.
             try:
                 metadata["dimensions"] = f"{im.width}x{im.height}"
                 metadata["color_mode"] = im.mode
@@ -85,15 +95,58 @@ def extract(path: Path) -> ExtractedDoc:
                     metadata["pil_format"] = im.format
             except Exception:
                 pass
-            # EXIF (incl. GPS + ExifIFD).
             metadata.update(collect(_read_exif(im), prefix="exif_"))
-    except Exception:
-        pass
+
+            def _iter_frames():
+                nonlocal ocr_failed, ocr_unavailable
+                for frame_index in range(n_frames):
+                    try:
+                        im.seek(frame_index)
+                    except EOFError:
+                        break
+                    frame_text = ""
+                    # TODO(vision): if OCR is sparse, optionally describe this frame with a vision model
+                    if not tesseract_available():
+                        ocr_unavailable = True
+                    else:
+                        try:
+                            frame_text = ocr_image(im.copy(), langs=settings.tesseract_langs)
+                            ocr_pages.append(frame_index)
+                        except Exception as exc:  # noqa: BLE001
+                            ocr_failed = True
+                            log.warning("OCR failed for %s frame %d: %s", path, frame_index + 1, exc)
+                    yield frame_text
+
+            kept = select_pages(_iter_frames(), cfg)
+    except Exception as exc:  # noqa: BLE001
+        raise CorruptDocumentError(f"image failed for {path}: {exc}") from exc
+
+    if n_frames == 1:
+        sections = [Section(label=None, text=kept[0] if kept else "", index=0)]
+        total_sections = None
+    else:
+        sections = [
+            Section(label=f"Page {i + 1}", text=text, index=i)
+            for i, text in enumerate(kept)
+        ]
+        total_sections = n_frames
+
+    if ocr_pages:
+        ocr_decision = "ocr_full" if n_frames == 1 else "ocr_pages"
+    elif ocr_failed:
+        ocr_decision = "ocr_failed"
+    elif ocr_unavailable:
+        ocr_decision = "ocr_unavailable"
+    else:
+        ocr_decision = "no_ocr"
 
     return ExtractedDoc(
         path=path,
-        text="",
+        sections=sections,
+        total_sections=total_sections,
         format="image",
-        ocr_decision="ocr_full",
+        ocr_used=bool(ocr_pages),
+        ocr_decision=ocr_decision,
+        ocr_pages=ocr_pages or None,
         extracted_metadata=metadata,
     )

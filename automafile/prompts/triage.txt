@@ -21,26 +21,21 @@ Output schema (all keys required, ordering as shown):
   "currency":      string|null,    // ISO 4217 code (USD, EUR, ILS, GBP, etc.) if amount is set.
   "language":      string,         // ISO 639-1 code: "he", "en", "mixed", or "unknown".
   "confidence":    string,         // one of: "high", "medium", "low".
-  "needs_review":  boolean,        // true if the document is ambiguous, partially unreadable, or category doesn't fit cleanly.
+  "review":        boolean,        // true if the document is ambiguous, partially unreadable, or category doesn't fit cleanly.
   "reason":        string|null     // one short sentence explaining the chosen category. Optional.
 }
 
 Taxonomy categories (use exactly one of these strings for `category`):
 {taxonomy}
 
-Context: a few filesystem facts plus all metadata fields the file itself
-declares (Office core/custom properties, PDF DocInfo + XMP, EXIF — including
-GPS and date-taken, HTML <meta>, EPUB Dublin Core, etc.). Field names follow
-each format's natural conventions (``core_*`` for Office, ``info_*`` and
-``dc:*`` / ``xmp:*`` / ``pdf:*`` for PDFs, ``exif_*`` for images,
-``meta_*`` for HTML, ``dc_*`` for EPUB). Values can be missing, partial, or
-stale — treat as soft context, not authority. Use them when they clearly
-help (a populated ``core_creator`` is a strong correspondent signal; an
-``exif_DateTimeOriginal`` is a strong date signal); ignore when they don't.
+Context: filesystem facts plus source-declared metadata such as Office properties, PDF DocInfo/XMP, EXIF, HTML meta, and EPUB Dublin Core. Keys keep source-style prefixes (``core_*``, ``info_*``, ``dc:*``, ``xmp:*``, ``pdf:*``, ``exif_*``, ``meta_*``, ``dc_*``). Values may be missing, partial, or stale. Treat them as soft context: use clear creator, GPS, or date signals; ignore weak or conflicting ones.
 
+---
 {hints}
+---
 
-Document excerpt (may be partial, OCR'd, or noisy):
+Document excerpt (may be partial, OCR'd, noisy, or split into pages/slides/sheets/chapters). Section labels may include the source's total section count. If shown sections or a "showing pages" marker cover fewer sections than that total, you did not see the full document; treat unseen content as unknown, not absent. If labels, in-content page numbers, and totals disagree, treat it as extraction drift and lower confidence when material:
+
 ---
 {text}
 ---

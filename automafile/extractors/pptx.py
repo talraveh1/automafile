@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from automafile.config import get_settings
+from automafile.extractors._caps import CapConfig, select_pages
 from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # python-pptx CoreProperties attributes — same OOXML core schema as docx.
@@ -26,15 +28,24 @@ def extract(path: Path) -> ExtractedDoc:
     except Exception as exc:  # noqa: BLE001
         raise CorruptDocumentError(f"pptx failed for {path}: {exc}") from exc
 
-    chunks: list[str] = []
-    for slide_idx, slide in enumerate(pres.slides, start=1):
-        chunks.append(f"# Slide {slide_idx}")
-        for shape in slide.shapes:
-            if shape.has_text_frame:
-                for para in shape.text_frame.paragraphs:
-                    line = "".join(run.text for run in para.runs)
-                    if line.strip():
-                        chunks.append(line)
+    cfg = CapConfig.from_settings(get_settings())
+
+    def _iter_slides():
+        for slide in pres.slides:
+            chunks: list[str] = []
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        line = "".join(run.text for run in para.runs)
+                        if line.strip():
+                            chunks.append(line)
+            yield "\n".join(chunks)
+
+    kept = select_pages(_iter_slides(), cfg)
+    sections = [
+        Section(label=f"Slide {i + 1}", text=text, index=i)
+        for i, text in enumerate(kept)
+    ]
 
     raw: dict = {}
     try:
@@ -46,7 +57,8 @@ def extract(path: Path) -> ExtractedDoc:
 
     return ExtractedDoc(
         path=path,
-        text="\n".join(chunks),
+        sections=sections,
+        total_sections=len(pres.slides),
         format="pptx",
         extracted_metadata=collect(raw, prefix="core_"),
     )

@@ -1,4 +1,4 @@
-"""Dispatch a path to the correct extractor based on extension or MIME."""
+"""Dispatch a path to the correct extractor using extension and MIME fallbacks."""
 
 from __future__ import annotations
 
@@ -15,40 +15,42 @@ from automafile.extractors import (
     unknown as unknown_ext,
     xlsx as xlsx_ext,
 )
-from automafile.extractors.base import ExtractedDoc
+from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, ExtractorError
 from automafile.log import get_logger
 
 
 log = get_logger(__name__)
 
 
-EXT_MAP = {
-    ".pdf": pdf_ext,
-    ".docx": docx_ext,
-    ".xlsx": xlsx_ext,
-    ".pptx": pptx_ext,
-    ".jpg": image_ext,
-    ".jpeg": image_ext,
-    ".png": image_ext,
-    ".gif": image_ext,
-    ".bmp": image_ext,
-    ".tif": image_ext,
-    ".tiff": image_ext,
-    ".webp": image_ext,
-    ".heic": image_ext,
-    ".heif": image_ext,
-    ".html": html_ext,
-    ".htm": html_ext,
-    ".epub": epub_ext,
-    ".txt": text_ext,
-    ".md": text_ext,
-    ".markdown": text_ext,
-    ".csv": text_ext,
-    ".log": text_ext,
-    ".json": text_ext,
-    ".xml": text_ext,
-    ".yaml": text_ext,
-    ".yml": text_ext,
+UNKNOWN_MIME = "unknown"
+
+EXT_MIME_MAP = {
+    ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".epub": "application/epub+zip",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".csv": "text/csv",
+    ".log": "text/plain",
+    ".json": "application/json",
+    ".xml": "application/xml",
+    ".yaml": "application/x-yaml",
+    ".yml": "application/x-yaml",
 }
 
 MIME_MAP = {
@@ -62,12 +64,25 @@ MIME_MAP = {
     "image/tiff": image_ext,
     "image/webp": image_ext,
     "text/plain": text_ext,
+    "text/csv": text_ext,
+    "text/markdown": text_ext,
     "text/html": html_ext,
+    "application/json": text_ext,
+    "application/xml": text_ext,
+    "text/xml": text_ext,
+    "application/yaml": text_ext,
+    "application/x-yaml": text_ext,
     "application/epub+zip": epub_ext,
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": docx_ext,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": xlsx_ext,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": pptx_ext,
 }
+EXT_MAP = {
+    ext: MIME_MAP[mime]
+    for ext, mime in EXT_MIME_MAP.items()
+    if mime in MIME_MAP
+}
+_STRICT_AWARE_EXTRACTORS = {text_ext, html_ext, unknown_ext}
 
 
 def _sniff_mime(path: Path) -> str | None:
@@ -81,21 +96,62 @@ def _sniff_mime(path: Path) -> str | None:
         return None
 
 
+def _mime_from_extension(path: Path) -> str:
+    return EXT_MIME_MAP.get(path.suffix.lower(), UNKNOWN_MIME)
+
+
+def _extractor_for_mime(mime: str):
+    if mime == UNKNOWN_MIME:
+        return unknown_ext
+    return MIME_MAP.get(mime)
+
+
+def _extract_with_mime(path: Path, mime: str, *, strict: bool) -> ExtractedDoc:
+    extractor = _extractor_for_mime(mime)
+    if extractor is None:
+        raise CorruptDocumentError(f"Unsupported MIME type for extraction: {mime}")
+    if extractor in _STRICT_AWARE_EXTRACTORS:
+        return extractor.extract(path, strict=strict)
+    return extractor.extract(path)
+
+
 def get_extractor(path: Path):
-    ext = path.suffix.lower()
-    if ext in EXT_MAP:
-        mod = EXT_MAP[ext]
-        log.debug("extractor for %s: %s (by extension)", path.name, mod.__name__)
+    ext_mime = _mime_from_extension(path)
+    if ext_mime != UNKNOWN_MIME:
+        mod = _extractor_for_mime(ext_mime) or unknown_ext
+        log.debug("extractor for %s: %s (by extension MIME %s)", path.name, mod.__name__, ext_mime)
         return mod
     mime = _sniff_mime(path)
-    if mime and mime in MIME_MAP:
-        mod = MIME_MAP[mime]
+    mod = _extractor_for_mime(mime or UNKNOWN_MIME)
+    if mod is not None and mime:
         log.debug("extractor for %s: %s (by mime %s)", path.name, mod.__name__, mime)
         return mod
-    log.debug("extractor for %s: unknown (ext=%s mime=%s)", path.name, ext, mime)
+    log.debug("extractor for %s: unknown (ext=%s mime=%s)", path.name, path.suffix.lower(), mime)
     return unknown_ext
 
 
 def extract(path: Path) -> ExtractedDoc:
-    extractor = get_extractor(path)
-    return extractor.extract(path)
+    mime = _mime_from_extension(path)
+    if mime != UNKNOWN_MIME:
+        try:
+            doc = _extract_with_mime(path, mime, strict=True)
+            log.debug("extracted %s by extension MIME %s", path.name, mime)
+            return doc
+        except ExtractorError as exc:
+            log.debug("extension MIME extraction failed for %s as %s: %s", path.name, mime, exc)
+
+    sniffed_mime = _sniff_mime(path)
+    if sniffed_mime:
+        mime = sniffed_mime
+        log.debug("sniffed %s as %s", path.name, mime)
+
+    if mime != UNKNOWN_MIME:
+        try:
+            doc = _extract_with_mime(path, mime, strict=False)
+            log.debug("extracted %s by sniffed/fallback MIME %s", path.name, mime)
+            return doc
+        except ExtractorError as exc:
+            log.debug("fallback MIME extraction failed for %s as %s: %s", path.name, mime, exc)
+
+    log.debug("extracting %s as unknown", path.name)
+    return _extract_with_mime(path, UNKNOWN_MIME, strict=False)

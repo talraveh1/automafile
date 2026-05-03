@@ -28,7 +28,7 @@ runner = CliRunner()
 
 _FAKE = EnrichmentResult(
     title="t", summary="s body of summary", tags=["x"], category="Personal",
-    confidence="high", needs_review=False, language="en", tier="strict",
+    confidence="high", review=False, language="en", tier="strict",
 )
 
 

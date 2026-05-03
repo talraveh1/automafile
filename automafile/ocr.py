@@ -104,11 +104,27 @@ def tesseract_languages() -> list[str]:
         return []
 
 
+def should_ocr_page(text: str) -> bool:
+    settings = get_settings()
+    return len((text or "").strip()) < settings.ocr_min_page_chars
+
+
+def ocr_image(image, langs: str | None = None) -> str:
+    settings = get_settings()
+    langs = langs or settings.tesseract_langs
+    bin_path = _configure_pytesseract()
+    if not bin_path:
+        raise RuntimeError("Tesseract is not installed or configured.")
+
+    import pytesseract
+
+    return pytesseract.image_to_string(image, lang=langs)
+
+
 def pdf_ocr_decision(path: Path, per_page_chars: list[int] | None = None) -> OcrDecision:
     """Decide whether a PDF needs OCR and over which pages.
 
-    If ``per_page_chars`` is supplied (typically from ``extractors.pdf.extract``),
-    we skip our own pypdf parse — the extractor already did it.
+    If ``per_page_chars`` is supplied, skip the pypdf text-count pass.
     """
     settings = get_settings()
     if per_page_chars is None:
@@ -195,7 +211,7 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
             pass
         from PIL import Image
         with Image.open(path) as im:
-            text = pytesseract.image_to_string(im, lang=langs)
+            text = ocr_image(im, langs=langs)
         log.info("ocr done: %s -> %d chars in %dms", path.name, len(text), int((_time.perf_counter() - started) * 1000))
         return text
 

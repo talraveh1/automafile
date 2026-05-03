@@ -4,13 +4,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.extractors.base import ExtractedDoc
+from automafile.config import get_settings
+from automafile.extractors._caps import CapConfig, trim_to_word_boundary
+from automafile.extractors._text_quality import raise_if_garbled
+from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
-def extract(path: Path) -> ExtractedDoc:
-    text = path.read_text(encoding="utf-8", errors="replace")
+def extract(path: Path, *, strict: bool = False) -> ExtractedDoc:
+    cfg = CapConfig.from_settings(get_settings())
+    try:
+        raw = path.read_bytes()
+        text = raw.decode("utf-8", errors="strict" if strict else "replace")
+        raise_if_garbled(raw, text, path)
+    except UnicodeDecodeError as exc:
+        raise CorruptDocumentError(f"UTF-8 text decoding failed for {path}: {exc}") from exc
+    except OSError as exc:
+        raise CorruptDocumentError(f"Text reading failed for {path}: {exc}") from exc
+    text = trim_to_word_boundary(text, cfg.target_chars)
     return ExtractedDoc(
         path=path,
-        text=text,
+        sections=[Section(label=None, text=text, index=0)],
+        total_sections=None,
         format="text",
     )

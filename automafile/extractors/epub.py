@@ -5,8 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from automafile.config import get_settings
+from automafile.extractors._caps import CapConfig, select_pages
 from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # Full Dublin Core element set (the EPUB spec recommends these).
@@ -29,12 +31,25 @@ def extract(path: Path) -> ExtractedDoc:
     except Exception as exc:  # noqa: BLE001
         raise CorruptDocumentError(f"epub failed: {exc}") from exc
 
-    chunks: list[str] = []
-    for item in book.get_items_of_type(ITEM_DOCUMENT):
-        soup = BeautifulSoup(item.get_content(), "html.parser")
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        chunks.append(soup.get_text(separator="\n").strip())
+    cfg = CapConfig.from_settings(get_settings())
+    items = list(book.get_items_of_type(ITEM_DOCUMENT))
+    labels: list[str] = []
+
+    def _iter_chapters():
+        for i, item in enumerate(items):
+            soup = BeautifulSoup(item.get_content(), "html.parser")
+            for tag in soup(["script", "style"]):
+                tag.decompose()
+            title = soup.find(["h1", "title"])
+            label = title.get_text(" ", strip=True) if title else ""
+            labels.append(label or f"Chapter {i + 1}")
+            yield soup.get_text(separator="\n").strip()
+
+    kept = select_pages(_iter_chapters(), cfg)
+    sections = [
+        Section(label=labels[i], text=text, index=i)
+        for i, text in enumerate(kept)
+    ]
 
     raw: dict[str, Any] = {}
     if hasattr(book, "get_metadata"):
@@ -58,7 +73,8 @@ def extract(path: Path) -> ExtractedDoc:
 
     return ExtractedDoc(
         path=path,
-        text="\n\n".join(chunks),
+        sections=sections,
+        total_sections=len(items),
         format="epub",
         extracted_metadata=collect(raw, prefix="dc_"),
     )

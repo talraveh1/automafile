@@ -15,7 +15,7 @@ _FAKE = EnrichmentResult(
     tags=["a", "b"],
     category="Personal",
     confidence="high",
-    needs_review=False,
+    review=False,
     language="en",
     tier="strict",
 )

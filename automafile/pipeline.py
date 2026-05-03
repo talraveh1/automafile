@@ -1,4 +1,4 @@
-"""End-to-end per-file processing: extract → OCR → enrich → write metadata."""
+"""End-to-end per-file processing: extract → enrich → write metadata."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ from pathlib import Path
 
 from automafile.config import get_settings
 from automafile.dispatch import extract as dispatch_extract
+from automafile.extractors._caps import CapConfig, trim_to_word_boundary
 from automafile.extractors.base import (
     EncryptedDocumentError,
     ExtractedDoc,
     ExtractorError,
+    Section,
 )
 from automafile.log import get_logger
 from automafile.llm import enrich, EnrichmentResult
@@ -19,8 +21,6 @@ from automafile.metadata import sidecar
 from automafile.metadata.schema import OcrBlock, utc_now_iso
 from automafile.ocr import (
     OcrDecision,
-    pdf_ocr_decision,
-    record_ocr_metadata,
     run_ocr,
     tesseract_available,
     tesseract_version,
@@ -43,12 +43,17 @@ class ProcessResult:
     sidecar_path: Path | None = None
 
 
-def _decide_ocr(doc: ExtractedDoc) -> OcrDecision:
-    if doc.format == "image":
-        return OcrDecision(action="ocr_full", reason="image_format")
-    if doc.format == "pdf":
-        return pdf_ocr_decision(doc.path, per_page_chars=doc.per_page_chars)
-    return OcrDecision(action="no_ocr")
+def _ocr_block_for(doc: ExtractedDoc) -> OcrBlock:
+    settings = get_settings()
+    if not doc.ocr_used:
+        return OcrBlock(decision=doc.ocr_decision)
+    return OcrBlock(
+        decision=doc.ocr_decision,
+        done_at=utc_now_iso(),
+        engine="tesseract",
+        engine_version=tesseract_version(),
+        languages=settings.tesseract_langs,
+    )
 
 
 def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedDoc, OcrBlock]:
@@ -67,8 +72,14 @@ def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedD
         log.error("OCR failed for %s: %s", doc.path, exc)
         block = OcrBlock(decision="ocr_failed")
         return doc, block
-    doc.text = (doc.text + "\n\n" + text).strip() if doc.text else text
+    cfg = CapConfig.from_settings(settings)
+    combined = (doc.text + "\n\n" + text).strip() if doc.text else text
+    doc.sections = [Section(label=None, text=trim_to_word_boundary(combined, cfg.target_chars), index=0)]
+    doc.total_sections = None
+    doc.refresh_text()
     doc.ocr_used = True
+    doc.ocr_decision = decision.action
+    doc.ocr_pages = pages
     block = OcrBlock(
         decision=decision.action,
         done_at=utc_now_iso(),
@@ -123,15 +134,16 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         return result
     log.debug("extracted %s: format=%s text=%dchars", path, doc.format, len(doc.text or ""))
 
-    decision = _decide_ocr(doc)
-    if force_ocr and decision.action == "no_ocr":
+    ocr_block = _ocr_block_for(doc)
+    result.ocr_decision = ocr_block.decision
+    if force_ocr:
         decision = OcrDecision(action="ocr_full", reason="forced")
-    result.ocr_decision = decision.action
-    log.debug("ocr decision for %s: %s (%s)", path, decision.action, decision.reason or "-")
-    doc, ocr_block = _maybe_run_ocr(doc, decision)
+        log.debug("ocr decision for %s: %s (%s)", path, decision.action, decision.reason or "-")
+        doc, ocr_block = _maybe_run_ocr(doc, decision)
+        result.ocr_decision = ocr_block.decision
 
     log.debug("enriching %s (%d chars)", path, len(doc.text or ""))
-    enrichment = enrich(doc.text, _hints_for(doc))
+    enrichment = enrich(doc, _hints_for(doc))
     result.enrichment = enrichment
     result.llm_tier = enrichment.tier
     result.category = enrichment.category

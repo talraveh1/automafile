@@ -13,14 +13,14 @@ VALID_JSON = """\
 {"title":"Invoice 12","summary":"A short summary.","tags":["bill","monthly"],
  "category":"Financial","subcategory":null,"correspondent":"Acme Corp",
  "date":"2026-04-01","amount":120.5,"currency":"USD","language":"en",
- "confidence":"high","needs_review":false,"reason":"clear invoice"}
+ "confidence":"high","review":false,"reason":"clear invoice"}
 """
 
 UNESCAPED_QUOTE_JSON = """\
 {"title":"Note","summary":"He said "hi" to me.","tags":["chat"],
  "category":"Personal","subcategory":null,"correspondent":null,
  "date":null,"amount":null,"currency":null,"language":"en",
- "confidence":"medium","needs_review":false,"reason":null}
+ "confidence":"medium","review":false,"reason":null}
 """
 
 GARBAGE = "blah blah {not json"
@@ -36,7 +36,7 @@ def test_strict_parse_succeeds():
     assert result.amount == 120.5
     assert result.currency == "USD"
     assert result.confidence == "high"
-    assert result.needs_review is False
+    assert result.review is False
 
 
 def test_repair_fixes_unescaped_inner_quotes():
@@ -51,7 +51,7 @@ def test_garbage_falls_through_to_placeholder():
     result = parse_with_tiers(GARBAGE)
     assert result.tier in {"placeholder", "regex"}
     assert result.category == "Unknown"
-    assert result.needs_review is True
+    assert result.review is True
 
 
 def test_hebrew_quote_sanitization():
@@ -61,12 +61,12 @@ def test_hebrew_quote_sanitization():
 
 
 def test_correspondent_list_is_flattened_to_string():
-    raw = '{"title":"paper","summary":"x","tags":[],"category":"Research","subcategory":null,"correspondent":["Ian Sommerville","Nuri Whitney","D.C. Schmidt"],"date":null,"amount":null,"currency":null,"language":"en","confidence":"high","needs_review":false,"reason":null}'
+    raw = '{"title":"paper","summary":"x","tags":[],"category":"Research","subcategory":null,"correspondent":["Ian Sommerville","Nuri Whitney","D.C. Schmidt"],"date":null,"amount":null,"currency":null,"language":"en","confidence":"high","review":false,"reason":null}'
     result = parse_with_tiers(raw)
     assert result.correspondent == "Ian Sommerville, Nuri Whitney, D.C. Schmidt"
 
 
 def test_category_alias_medical_to_personal():
-    raw = '{"title":"prescription","summary":"hi","tags":["rx"],"category":"medical","subcategory":null,"correspondent":null,"date":null,"amount":null,"currency":null,"language":"en","confidence":"medium","needs_review":false,"reason":null}'
+    raw = '{"title":"prescription","summary":"hi","tags":["rx"],"category":"medical","subcategory":null,"correspondent":null,"date":null,"amount":null,"currency":null,"language":"en","confidence":"medium","review":false,"reason":null}'
     result = parse_with_tiers(raw)
     assert result.category == "Personal"

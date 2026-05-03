@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from automafile.config import get_settings
+from automafile.extractors._caps import CapConfig, trim_to_word_boundary
 from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # python-docx CoreProperties attributes — these are the OOXML core
@@ -28,7 +30,9 @@ def extract(path: Path) -> ExtractedDoc:
         raise CorruptDocumentError(f"docx failed for {path}: {exc}") from exc
 
     paragraphs = [p.text for p in doc.paragraphs if p.text]
-    text = "\n".join(paragraphs)
+    cfg = CapConfig.from_settings(get_settings())
+    # docx pagination is layout-dependent; heading pseudo-sections are a future improvement
+    text = trim_to_word_boundary("\n".join(paragraphs), cfg.target_chars)
 
     raw: dict = {}
     try:
@@ -40,7 +44,8 @@ def extract(path: Path) -> ExtractedDoc:
 
     return ExtractedDoc(
         path=path,
-        text=text,
+        sections=[Section(label=None, text=text, index=0)],
+        total_sections=None,
         format="docx",
         extracted_metadata=collect(raw, prefix="core_"),
     )

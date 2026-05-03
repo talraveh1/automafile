@@ -218,14 +218,14 @@ def test_text_extractor_has_empty_extracted_metadata(tmp_path):
 
 
 def test_hints_for_merges_extracted_metadata(tmp_path):
-    from automafile.extractors.base import ExtractedDoc
+    from automafile.extractors.base import ExtractedDoc, Section
     from automafile.pipeline import _hints_for
 
     p = tmp_path / "x.pdf"
     p.write_bytes(b"%PDF-1.4\n")
     doc = ExtractedDoc(
         path=p,
-        text="...",
+        sections=[Section(label=None, text="...", index=0)],
         format="pdf",
         extracted_metadata={"info_Title": "Lease", "dc:creator": ["Acme"]},
     )

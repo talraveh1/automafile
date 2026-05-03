@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from automafile.config import get_settings
+from automafile.extractors._caps import CapConfig, select_pages
 from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc
+from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # openpyxl DocumentProperties attributes — the OOXML core properties
@@ -27,13 +29,28 @@ def extract(path: Path) -> ExtractedDoc:
     except Exception as exc:  # noqa: BLE001
         raise CorruptDocumentError(f"openpyxl failed for {path}: {exc}") from exc
 
-    chunks: list[str] = []
-    for ws in wb.worksheets:
-        chunks.append(f"# Sheet: {ws.title}")
-        for row in ws.iter_rows(values_only=True):
-            line = "\t".join("" if c is None else str(c) for c in row)
-            if line.strip():
+    cfg = CapConfig.from_settings(get_settings())
+
+    def _iter_sheets():
+        for ws in wb.worksheets:
+            chunks: list[str] = []
+            char_count = 0
+            for row in ws.iter_rows(values_only=True):
+                line = "\t".join("" if c is None else str(c) for c in row)
+                if not line.strip():
+                    continue
                 chunks.append(line)
+                char_count += len(line) + 1
+                if char_count >= cfg.per_page_chars:
+                    break
+            yield "\n".join(chunks)
+
+    sheet_count = len(wb.worksheets)
+    kept = select_pages(_iter_sheets(), cfg)
+    sections = [
+        Section(label=f"Sheet: {ws.title}", text=text, index=i)
+        for i, (ws, text) in enumerate(zip(wb.worksheets, kept, strict=False))
+    ]
 
     raw_core: dict = {}
     try:
@@ -61,7 +78,8 @@ def extract(path: Path) -> ExtractedDoc:
 
     return ExtractedDoc(
         path=path,
-        text="\n".join(chunks),
+        sections=sections,
+        total_sections=sheet_count,
         format="xlsx",
         extracted_metadata=metadata,
     )

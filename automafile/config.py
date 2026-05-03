@@ -2,7 +2,7 @@
 
 Settings are loaded from ``config.jsonc`` at the repo root. Every key may be
 overridden by an environment variable of the same name in upper-case form
-(useful for tests).
+(useful for tests); extraction caps use ``EXTRACTION_<KEY>``.
 """
 
 from __future__ import annotations
@@ -65,6 +65,15 @@ def _coerce(value: str, default: Any) -> Any:
     return value
 
 
+class ExtractionSettings(BaseModel):
+    """Caps for bounded document text extraction."""
+
+    min_pages: int = 3
+    max_pages: int = 5
+    per_page_chars: int = 1500
+    target_chars: int = 6000
+
+
 class Settings(BaseModel):
     """Frozen runtime configuration."""
 
@@ -86,6 +95,7 @@ class Settings(BaseModel):
     ocr_min_text_chars: int = 100
     ocr_min_page_chars: int = 50
     ocr_sparse_page_ratio: float = 0.3
+    extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
 
     storage_dir: Path
     scan_dir: Path
@@ -126,6 +136,12 @@ def get_settings() -> Settings:
         "scan_dir": "",
         "logs_dir": "",
     }
+    extraction_fields: dict[str, Any] = {
+        "min_pages": 3,
+        "max_pages": 5,
+        "per_page_chars": 1500,
+        "target_chars": 6000,
+    }
 
     resolved: dict[str, Any] = {}
     for key, default in fields.items():
@@ -136,6 +152,17 @@ def get_settings() -> Settings:
             resolved[key] = file_cfg[key]
         else:
             resolved[key] = default
+
+    extraction_file_cfg = file_cfg.get("extraction") if isinstance(file_cfg.get("extraction"), dict) else {}
+    extraction_resolved: dict[str, Any] = {}
+    for key, default in extraction_fields.items():
+        env_val = os.environ.get(f"EXTRACTION_{key.upper()}")
+        if env_val is not None and env_val != "":
+            extraction_resolved[key] = _coerce(env_val, default)
+        elif key in extraction_file_cfg and extraction_file_cfg[key] not in (None, ""):
+            extraction_resolved[key] = extraction_file_cfg[key]
+        else:
+            extraction_resolved[key] = default
 
     documents_root = Path(str(resolved.pop("documents_root"))).expanduser().resolve()
     storage_dir = Path(str(resolved.pop("storage_dir"))).expanduser().resolve()
@@ -148,6 +175,7 @@ def get_settings() -> Settings:
         storage_dir=storage_dir,
         scan_dir=scan_dir,
         logs_dir=logs_dir,
+        extraction=ExtractionSettings(**extraction_resolved),
         **resolved,
     )
 
