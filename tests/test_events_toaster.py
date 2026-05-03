@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from automafile import events
-from automafile import toaster
-from automafile.toaster import Cursor, _consume, _format_toast, _maybe_compact
+from dragndoc import events
+from dragndoc import toaster
+from dragndoc.toaster import Cursor, _consume, _format_toast, _maybe_compact
 
 
 def _read_lines(path: Path) -> list[dict]:
@@ -41,7 +41,7 @@ def test_append_multiple_events_preserves_order():
 
 def test_format_toast_processed():
     title, body = _format_toast({"kind": "processed", "file": "f.pdf", "category": "Receipts", "target": "Receipts/2026-01 X.pdf"})
-    assert title == "Automafile"
+    assert title == "Drag'n'Doc"
     assert "f.pdf" in body
     assert "Receipts" in body
     assert "Receipts/2026-01 X.pdf" in body
@@ -56,7 +56,7 @@ def test_format_toast_quarantined():
 
 def test_format_toast_unknown_kind_falls_through():
     title, body = _format_toast({"kind": "weird", "extra": "data"})
-    assert title == "Automafile"
+    assert title == "Drag'n'Doc"
     assert "weird" in body
 
 
@@ -157,6 +157,85 @@ def test_compact_skipped_when_cursor_behind(docs_root, monkeypatch):
     cursor = _maybe_compact(path, Cursor())
     assert path.stat().st_size == pre_size
     assert cursor.offset == 0
+
+
+def test_mute_skips_toast_but_drains_journal_and_updates_status(docs_root):
+    """Muted notifications still advance the cursor and update the status
+    line — only the toast call is skipped."""
+    from dragndoc.toaster import TrayState
+    state = TrayState()
+    state.toggle_notifications()  # → disabled
+    assert not state.is_enabled()
+
+    events.append("processed", file="a.pdf")
+    events.append("processed", file="b.pdf")
+
+    notifier = MagicMock()
+    cursor = _consume(events.events_path(), Cursor(), notifier, state)
+
+    notifier.notify.assert_not_called()
+    assert cursor.offset > 0
+    # Status line reflects the most recent event regardless of mute.
+    assert "b.pdf" in state.status_text()
+
+
+def test_status_text_default_and_after_event(docs_root):
+    from dragndoc.toaster import TrayState
+    state = TrayState()
+    assert state.status_text() == "No notifications yet"
+
+    events.append("processed", file="report.pdf", category="Finance")
+    _consume(events.events_path(), Cursor(), MagicMock(), state)
+    text = state.status_text()
+    assert "report.pdf" in text
+    assert "Finance" in text
+
+
+def test_count_ready_for_triage(docs_root):
+    """Files in the inbox with a sidecar count; those without don't."""
+    from dragndoc.toaster import _count_ready_for_triage
+
+    inbox = docs_root / "Inbox"
+    meta = inbox / ".meta"
+    meta.mkdir()
+
+    # has sidecar → counts
+    (inbox / "ready.pdf").write_text("x", encoding="utf-8")
+    (meta / "ready.pdf.md").write_text("---\nschema_version: 1\n---\n", encoding="utf-8")
+
+    # no sidecar → doesn't count
+    (inbox / "pending.pdf").write_text("x", encoding="utf-8")
+
+    # tmp suffix → doesn't count even with a sidecar
+    (inbox / "wip.pdf.tmp").write_text("x", encoding="utf-8")
+    (meta / "wip.pdf.tmp.md").write_text("---\n---\n", encoding="utf-8")
+
+    # nested folder with sidecar → counts (watcher is recursive)
+    nested = inbox / "sub"
+    (nested / ".meta").mkdir(parents=True)
+    (nested / "deep.pdf").write_text("x", encoding="utf-8")
+    (nested / ".meta" / "deep.pdf.md").write_text("---\n---\n", encoding="utf-8")
+
+    assert _count_ready_for_triage() == 2
+
+
+def test_consume_progress_is_observable_via_snapshot(docs_root):
+    """Regression: ``_consume`` mutates the cursor in place, so the run loops
+    must snapshot ``(offset, size_seen)`` *before* calling _consume to detect
+    progress. A naive ``new_cursor != cursor`` check would always be equal
+    (same object) and the cursor would never get persisted to disk."""
+    events.append("processed", file="a.pdf")
+    cursor = Cursor()
+    prev = (cursor.offset, cursor.size_seen)
+    returned = _consume(events.events_path(), cursor, MagicMock())
+    after = (returned.offset, returned.size_seen)
+    assert returned is cursor, "_consume currently mutates in place; if you change that, also revisit the run loops"
+    assert prev != after, "snapshot-based progress check must observe a difference"
+
+
+def test_count_ready_for_triage_empty(docs_root):
+    from dragndoc.toaster import _count_ready_for_triage
+    assert _count_ready_for_triage() == 0
 
 
 def test_cursor_round_trip(tmp_path):

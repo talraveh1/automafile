@@ -6,20 +6,20 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from automafile.config import get_settings
-from automafile.dispatch import extract as dispatch_extract
-from automafile.extractors._caps import CapConfig, trim_to_word_boundary
-from automafile.extractors.base import (
+from dragndoc.config import get_settings
+from dragndoc.dispatch import extract as dispatch_extract
+from dragndoc.extractors._caps import CapConfig, trim_to_word_boundary
+from dragndoc.extractors.base import (
     EncryptedDocumentError,
     ExtractedDoc,
     ExtractorError,
     Section,
 )
-from automafile.log import get_logger
-from automafile.llm import enrich, EnrichmentResult
-from automafile.metadata import sidecar
-from automafile.metadata.schema import OcrBlock, utc_now_iso
-from automafile.ocr import (
+from dragndoc.log import get_logger
+from dragndoc.llm import enrich, EnrichmentResult
+from dragndoc.metadata import sidecar
+from dragndoc.metadata.schema import OcrBlock, utc_now_iso
+from dragndoc.ocr import (
     OcrDecision,
     run_ocr,
     tesseract_available,

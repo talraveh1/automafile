@@ -1,6 +1,6 @@
 """Tail the events journal, fire Windows toasts, and host a tray icon.
 
-Standalone consumer process: invoke via ``automafile toaster``. Runs even
+Standalone consumer process: invoke via ``dnd toaster``. Runs even
 when the pipeline lives in a container, so toasts surface on the host.
 
 Cursor file (``<storage_dir>/toaster.cursor``) tracks the byte offset of
@@ -16,7 +16,7 @@ most recent event.
 from __future__ import annotations
 
 import json
-import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -26,17 +26,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from automafile.config import get_settings
-from automafile.events import events_path
-from automafile.log import get_logger
-from automafile.notifier import Notifier
+from dragndoc.config import get_settings
+from dragndoc.events import events_path
+from dragndoc.log import get_logger
+from dragndoc.notifier import Notifier
 
 
 log = get_logger(__name__)
 
 
 CURSOR_FILENAME = "toaster.cursor"
-LOG_FILENAME = "automafile.log"
+LOG_FILENAME = "dragndoc.log"
 COMPACT_THRESHOLD_BYTES = 1_000_000  # 1 MB
 POLL_INTERVAL_SECONDS = 1.0
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -72,29 +72,37 @@ class Cursor:
 @dataclass
 class TrayState:
     """Mutable state surfaced via the tray menu so the user can see what's happening."""
-    last_event_ts: Optional[str] = None
-    last_event_summary: Optional[str] = None
-    events_seen: int = 0
+    last_notification: Optional[str] = None
+    notifications_enabled: bool = True
+    action_items: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
-    def record(self, event: dict[str, Any], title: str, body: str) -> None:
+    def record_notification(self, title: str, body: str) -> None:
         with self._lock:
-            self.last_event_ts = event.get("ts")
-            self.last_event_summary = f"{title}: {body}"
-            self.events_seen += 1
+            self.last_notification = f"{title}: {body}"
+
+    def set_action_items(self, n: int) -> None:
+        with self._lock:
+            self.action_items = n
+
+    def has_action_items(self) -> bool:
+        with self._lock:
+            return self.action_items > 0
+
+    def toggle_notifications(self) -> bool:
+        with self._lock:
+            self.notifications_enabled = not self.notifications_enabled
+            return self.notifications_enabled
+
+    def is_enabled(self) -> bool:
+        with self._lock:
+            return self.notifications_enabled
 
     def status_text(self) -> str:
         with self._lock:
-            if self.events_seen == 0:
-                return "Idle (no events yet)"
-            ts = self.last_event_ts or ""
-            try:
-                # show local HH:MM:SS for compactness
-                clock = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone().strftime("%H:%M:%S")
-            except (ValueError, AttributeError):
-                clock = ts[:19]
-            summary = self.last_event_summary or ""
-            return f"Last @ {clock}: {_truncate(summary, 60)}"
+            if self.last_notification is None:
+                return "No notifications yet"
+            return _truncate(self.last_notification, 80)
 
 
 def _truncate(s: str, n: int) -> str:
@@ -109,13 +117,13 @@ def _format_toast(event: dict[str, Any]) -> tuple[str, str]:
         target = event.get("target")
         if target:
             body += f" ({target})"
-        return "Automafile", body
+        return "Drag'n'Doc", body
     if kind == "quarantined":
         return "Sidecar quarantined", f"{event.get('file', '?')} ({event.get('reason', '?')})"
     if kind == "error":
-        return "Automafile error", f"{event.get('file', '?')}: {event.get('error', '?')}"
+        return "Drag'n'Doc error", f"{event.get('file', '?')}: {event.get('error', '?')}"
     leftover = {k: v for k, v in event.items() if k not in {"ts", "kind"}}
-    return "Automafile", f"{kind}: {json.dumps(leftover, ensure_ascii=False)}"
+    return "Drag'n'Doc", f"{kind}: {json.dumps(leftover, ensure_ascii=False)}"
 
 
 def _consume(
@@ -124,7 +132,12 @@ def _consume(
     notifier: Notifier,
     state: Optional[TrayState] = None,
 ) -> Cursor:
-    """Read new bytes from the journal, fire toasts, return updated cursor."""
+    """Read new bytes from the journal, fire toasts, return updated cursor.
+
+    When notifications are muted, events are still drained from the journal
+    (so the cursor advances and re-enabling doesn't replay a backlog) and
+    the status line is still updated — only the toast call is skipped.
+    """
     try:
         size = events_file.stat().st_size
     except FileNotFoundError:
@@ -151,6 +164,8 @@ def _consume(
     consumable = chunk[: last_nl + 1]
     new_offset = cursor.offset + len(consumable)
 
+    enabled = state.is_enabled() if state is not None else True
+
     for raw in consumable.splitlines():
         if not raw.strip():
             continue
@@ -160,9 +175,10 @@ def _consume(
             log.warning("skipping malformed event line: %s", exc)
             continue
         title, body = _format_toast(event)
-        notifier.notify(title, body)
+        if enabled:
+            notifier.notify(title, body)
         if state is not None:
-            state.record(event, title, body)
+            state.record_notification(title, body)
 
     cursor.offset = new_offset
     cursor.size_seen = size
@@ -202,28 +218,80 @@ def _open_log() -> None:
     interpreter = pyw if pyw.exists() else Path(sys.executable)
     try:
         subprocess.Popen(
-            [str(interpreter), "-m", "automafile.log_viewer", str(log_file)],
+            [str(interpreter), "-m", "dragndoc.log_viewer", str(log_file)],
             cwd=str(REPO_ROOT),
         )
     except OSError as exc:
         log.warning("Could not launch log viewer: %s", exc)
 
 
+def _find_mintty() -> Optional[str]:
+    found = shutil.which("mintty.exe")
+    if found:
+        return found
+    for candidate in (
+        Path(r"C:\Program Files\Git\usr\bin\mintty.exe"),
+        Path(r"C:\Program Files (x86)\Git\usr\bin\mintty.exe"),
+    ):
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def _launch_triage() -> None:
-    """Open a *legacy* console window (conhost.exe, not Windows Terminal) running triage.cmd."""
+    """Open a console window running triage.cmd. Prefers Windows Terminal."""
     if not TRIAGE_SCRIPT.exists():
         log.warning("Triage script not found: %s", TRIAGE_SCRIPT)
         return
-    # conhost.exe explicitly spawns the classic console host, bypassing the
-    # user's "Default terminal application" preference (Windows Terminal on
-    # Win11 22H2+). cmd /k keeps the window open after the script exits.
+    # Windows Terminal first (nicer UX); mintty is the fallback. Neither helps
+    # with Hebrew BiDi inside Claude Code's TUI — Ink's cursor-addressed output
+    # bypasses terminal-side BiDi entirely. cmd /k keeps the window open after
+    # the script exits.
+    wt = shutil.which("wt.exe")
+    mintty = _find_mintty()
+    if wt:
+        cmd = [wt, "-w", "new", "--focus", "-d", str(REPO_ROOT), "cmd.exe", "/k", str(TRIAGE_SCRIPT)]
+    elif mintty:
+        # Forward slashes dodge mintty's MSYS-style backslash mangling.
+        script = str(TRIAGE_SCRIPT).replace("\\", "/")
+        cmd = [mintty, "-h", "always", "--", "cmd.exe", "/k", script]
+    else:
+        cmd = ["conhost.exe", "cmd.exe", "/k", str(TRIAGE_SCRIPT)]
     try:
-        subprocess.Popen(
-            ["conhost.exe", "cmd.exe", "/k", str(TRIAGE_SCRIPT)],
-            cwd=str(REPO_ROOT),
-        )
+        subprocess.Popen(cmd, cwd=str(REPO_ROOT))
     except OSError as exc:
         log.warning("Could not launch triage: %s", exc)
+
+
+def _count_ready_for_triage() -> int:
+    """Files in the inbox tree that have a sidecar — i.e. processed and ready to file.
+
+    Walks recursively under ``<inbox_path>``, skipping the hidden ``.meta/``
+    folders and partial-download suffixes. Cheap enough for a 1 s poll on a
+    typical inbox; if your inbox grows beyond a few thousand items, swap in
+    a watchdog handler instead of polling.
+    """
+    settings = get_settings()
+    inbox = settings.inbox_path
+    if not inbox.exists():
+        return 0
+    meta = settings.meta_subfolder
+    skip_suffixes = {".tmp", ".part", ".crdownload"}
+    count = 0
+    try:
+        for p in inbox.rglob("*"):
+            if not p.is_file():
+                continue
+            if meta in p.parts:
+                continue
+            if p.suffix.lower() in skip_suffixes:
+                continue
+            sidecar = p.parent / meta / f"{p.name}.md"
+            if sidecar.exists():
+                count += 1
+    except OSError as exc:
+        log.debug("inbox count failed: %s", exc)
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -231,14 +299,14 @@ def _launch_triage() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _make_icon_image():
-    """Generate a 64×64 RGBA icon: blue rounded square with a white 'A'."""
+def _make_icon_image(red_dot: bool = False):
+    """Generate a 64×64 RGBA icon. ``red_dot`` overlays a small red badge
+    in the upper-right corner to indicate unhandled events."""
     from PIL import Image, ImageDraw, ImageFont
 
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    # blue background, slight rounding
     draw.rounded_rectangle((2, 2, size - 2, size - 2), radius=12, fill=(37, 99, 235, 255))
     try:
         font = ImageFont.truetype("arialbd.ttf", 40)
@@ -248,6 +316,12 @@ def _make_icon_image():
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1] - 2), text, fill=(255, 255, 255, 255), font=font)
+    if red_dot:
+        # 18px circle in the upper-right corner with a thin white halo so it
+        # reads against any tray background
+        cx, cy, r = 50, 14, 11
+        draw.ellipse((cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1), fill=(255, 255, 255, 255))
+        draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(220, 38, 38, 255))
     return img
 
 
@@ -266,15 +340,28 @@ def _run_with_tray(poll_interval: float) -> None:
     notifier = Notifier()
     stop_event = threading.Event()
 
-    def poll_loop() -> None:
+    # Cache the rendered images so swapping is just an attribute set, not a redraw.
+    icon_plain = _make_icon_image(red_dot=False)
+    icon_alert = _make_icon_image(red_dot=True)
+
+    def refresh_icon(icon) -> None:
+        target = icon_alert if state.has_action_items() else icon_plain
+        if icon.icon is not target:
+            icon.icon = target
+
+    def poll_loop(icon) -> None:
         nonlocal cursor
         while not stop_event.is_set():
             try:
-                new_cursor = _consume(events_file, cursor, notifier, state)
-                new_cursor = _maybe_compact(events_file, new_cursor)
-                if (new_cursor.offset, new_cursor.size_seen) != (cursor.offset, cursor.size_seen):
-                    new_cursor.save(cursor_file)
-                cursor = new_cursor
+                # _consume mutates the cursor in place; snapshot the prior
+                # state to detect real progress for the save guard.
+                prev = (cursor.offset, cursor.size_seen)
+                cursor = _consume(events_file, cursor, notifier, state)
+                cursor = _maybe_compact(events_file, cursor)
+                if (cursor.offset, cursor.size_seen) != prev:
+                    cursor.save(cursor_file)
+                state.set_action_items(_count_ready_for_triage())
+                refresh_icon(icon)
             except Exception as exc:  # noqa: BLE001
                 log.exception("Toaster poll error: %s", exc)
             stop_event.wait(poll_interval)
@@ -285,28 +372,38 @@ def _run_with_tray(poll_interval: float) -> None:
     def on_log(_icon, _item) -> None:
         _open_log()
 
+    def on_toggle_notifications(_icon, _item) -> None:
+        enabled = state.toggle_notifications()
+        log.info("Notifications %s via tray.", "enabled" if enabled else "disabled")
+
     def on_exit(icon, _item) -> None:
         log.info("Toaster exiting via tray menu.")
         stop_event.set()
         icon.stop()
 
-    # Menu is a callable so the status line refreshes on every right-click.
+    # Callable menu fields refresh on every open: status line stays current,
+    # the Notifications tick reflects the live toggle state.
     menu = Menu(
         Item(lambda _item: state.status_text(), None, enabled=False),
         Menu.SEPARATOR,
         Item("Triage", on_triage),
         Item("Log", on_log),
+        Item(
+            "Notifications",
+            on_toggle_notifications,
+            checked=lambda _item: state.is_enabled(),
+        ),
         Menu.SEPARATOR,
         Item("Exit", on_exit),
     )
 
-    icon = pystray.Icon("automafile", _make_icon_image(), "Automafile Toaster", menu=menu)
+    icon = pystray.Icon("dragndoc", icon_plain, "Drag'n'Doc Toaster", menu=menu)
 
-    poll_thread = threading.Thread(target=poll_loop, name="toaster-poll", daemon=True)
+    poll_thread = threading.Thread(target=poll_loop, args=(icon,), name="toaster-poll", daemon=True)
     poll_thread.start()
 
     log.info("Toaster watching %s (cursor=%d)", events_file, cursor.offset)
-    print(f"[automafile] Toaster watching {events_file}; right-click the tray icon to exit.")
+    print(f"[dragndoc] Toaster watching {events_file}; right-click the tray icon to exit.")
     try:
         icon.run()  # blocks until icon.stop()
     finally:
@@ -326,14 +423,16 @@ def _run_headless(poll_interval: float) -> None:
     notifier = Notifier()
 
     log.info("Toaster watching %s (cursor=%d, headless)", events_file, cursor.offset)
-    print(f"[automafile] Toaster watching {events_file}; Ctrl-C to stop.")
+    print(f"[dragndoc] Toaster watching {events_file}; Ctrl-C to stop.")
     try:
         while True:
-            new_cursor = _consume(events_file, cursor, notifier)
-            new_cursor = _maybe_compact(events_file, new_cursor)
-            if (new_cursor.offset, new_cursor.size_seen) != (cursor.offset, cursor.size_seen):
-                new_cursor.save(cursor_file)
-            cursor = new_cursor
+            # _consume mutates the cursor in place, so snapshot the prior
+            # state before the call to detect real progress.
+            prev = (cursor.offset, cursor.size_seen)
+            cursor = _consume(events_file, cursor, notifier)
+            cursor = _maybe_compact(events_file, cursor)
+            if (cursor.offset, cursor.size_seen) != prev:
+                cursor.save(cursor_file)
             time.sleep(poll_interval)
     except KeyboardInterrupt:
         log.info("Toaster stopped by user.")

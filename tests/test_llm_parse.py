@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from automafile.llm import (
+from dragndoc.llm import (
     HEBREW_GERSHAYIM,
     parse_with_tiers,
     sanitize_excerpt,

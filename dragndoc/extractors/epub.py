@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from automafile.config import get_settings
-from automafile.extractors._caps import CapConfig, select_pages
-from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
+from dragndoc.config import get_settings
+from dragndoc.extractors._caps import CapConfig, select_pages
+from dragndoc.extractors._meta import collect
+from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # Full Dublin Core element set (the EPUB spec recommends these).

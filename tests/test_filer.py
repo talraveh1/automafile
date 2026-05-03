@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from automafile.filer import FilingProposal, TargetCollision, apply_filing, propose_filing, smart_filename
-from automafile.metadata import sidecar
-from automafile.metadata.hashing import hash_file
-from automafile.metadata.schema import MetadataDoc, OcrBlock
+from dragndoc.filer import FilingProposal, TargetCollision, apply_filing, propose_filing, smart_filename
+from dragndoc.metadata import sidecar
+from dragndoc.metadata.hashing import hash_file
+from dragndoc.metadata.schema import MetadataDoc, OcrBlock
 
 
 def _seed(path: Path, body: str) -> None:

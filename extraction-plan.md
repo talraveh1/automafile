@@ -13,7 +13,7 @@ No backward-compatibility constraints — change schema and call sites freely.
 
 ---
 
-## 1. Schema changes — `automafile/extractors/base.py`
+## 1. Schema changes — `dragndoc/extractors/base.py`
 
 Add a `Section` dataclass and replace `text` semantics:
 
@@ -37,7 +37,7 @@ The `has_text` property becomes `bool(self.sections and any(s.text.strip() for s
 
 ---
 
-## 2. Adaptive cap algorithm — new module `automafile/extractors/_caps.py`
+## 2. Adaptive cap algorithm — new module `dragndoc/extractors/_caps.py`
 
 A single helper used by every paginated extractor. Pure function, no I/O:
 
@@ -150,7 +150,7 @@ The 50-char lookback is to avoid degenerate trims on Chinese/Japanese (no spaces
 
 ---
 
-## 4. Prompt rendering — `automafile/llm.py`
+## 4. Prompt rendering — `dragndoc/llm.py`
 
 `_build_prompt` (currently at line 111) and `enrich` (line 311) change:
 
@@ -166,11 +166,11 @@ The 50-char lookback is to avoid degenerate trims on Chinese/Japanese (no spaces
   - If `total_sections is None` and there's exactly one unlabeled section, render the bare text (no separator).
   - If `total_sections is not None` but only some pages are present (because we stopped at `max_pages`), append a trailing line: `--- (showing pages 1-5 of 47) ---` so the LLM knows it didn't see the whole doc.
 - **Drop the `[:6000]` slice in `_build_prompt`** — caps are enforced upstream now. Keep `sanitize_excerpt` (still relevant for Hebrew quote handling).
-- Update `automafile/prompts/triage.txt` to mention that `{text}` may be a partial document with page labels, so the LLM treats unseen content as "unknown" rather than absent.
+- Update `dragndoc/prompts/triage.txt` to mention that `{text}` may be a partial document with page labels, so the LLM treats unseen content as "unknown" rather than absent.
 
 ---
 
-## 5. Config — `automafile/config.py`
+## 5. Config — `dragndoc/config.py`
 
 Add a section:
 

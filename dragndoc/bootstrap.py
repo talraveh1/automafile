@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.config import REPO_ROOT, ensure_config_file, get_settings, reset_settings
-from automafile.log import get_logger
+from dragndoc.config import REPO_ROOT, ensure_config_file, get_settings, reset_settings
+from dragndoc.log import get_logger
 
 
 log = get_logger(__name__)
@@ -14,7 +14,7 @@ log = get_logger(__name__)
 _POINTER = """\
 # Memory pointer
 
-This directory is the project-local memory for Automafile.
+This directory is the project-local memory for Drag'n'Doc.
 
 - [preferences.md](preferences.md) — user-edited rules.
 - [taxonomy.md](taxonomy.md) — current categories and subcategories.

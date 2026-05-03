@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from automafile.extractors.base import ExtractedDoc, Section
-from automafile.llm import _build_prompt, _render_sections
+from dragndoc.extractors.base import ExtractedDoc, Section
+from dragndoc.llm import _build_prompt, _render_sections
 
 
 def test_render_single_unlabeled_section_as_bare_text(tmp_path):

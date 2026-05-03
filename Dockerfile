@@ -1,4 +1,4 @@
-# Lightweight Linux image for the Automafile pipeline.
+# Lightweight Linux image for the Drag'n'Doc pipeline.
 # Works under Docker Desktop, Podman Desktop, or any Compose-compatible runtime.
 
 FROM python:3.12-slim
@@ -37,10 +37,10 @@ RUN pip install --no-cache-dir serena-agent
 # non-root user for safer file ops on bind-mounted volumes
 ARG UID=1000
 ARG GID=1000
-RUN groupadd -g ${GID} automafile \
-    && useradd -m -u ${UID} -g ${GID} -s /bin/bash automafile \
-    && mkdir -p /home/automafile/.vscode-server \
-    && chown -R automafile:automafile /home/automafile/.vscode-server
+RUN groupadd -g ${GID} dragndoc \
+    && useradd -m -u ${UID} -g ${GID} -s /bin/bash dragndoc \
+    && mkdir -p /home/dragndoc/.vscode-server \
+    && chown -R dragndoc:dragndoc /home/dragndoc/.vscode-server
 
 WORKDIR /workspace
 
@@ -48,17 +48,17 @@ WORKDIR /workspace
 # (the workspace itself is bind-mounted at runtime, so we install into the image
 # from a copy here purely so cold container starts don't have to repeat pip)
 COPY pyproject.toml ./
-COPY automafile/__init__.py automafile/__init__.py
+COPY dragndoc/__init__.py dragndoc/__init__.py
 RUN mkdir -p build \
     && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -e .[dev] \
-    && rm -rf automafile
+    && rm -rf dragndoc
 
-USER automafile
+USER dragndoc
 
 # the docs root and Ollama URL are container-local; the host's config.jsonc
 # and host paths are unaffected
 ENV DOCUMENTS_ROOT=/docs \
     OLLAMA_URL=http://host.docker.internal:11434
 
-CMD ["python", "-m", "automafile", "watch"]
+CMD ["python", "-m", "dragndoc", "watch"]

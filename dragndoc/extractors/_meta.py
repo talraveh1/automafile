@@ -4,7 +4,7 @@ Each extractor calls into here to filter and clean a flat ``{field: value}``
 dict of fields the file *itself* declares (PDF DocInfo + XMP, OOXML core
 properties, EXIF, HTML ``<meta>``, etc.). The cleaned dict ends up on
 ``ExtractedDoc.extracted_metadata`` and is rendered into the LLM prompt
-as soft context — see ``automafile.pipeline._hints_for``.
+as soft context — see ``dragndoc.pipeline._hints_for``.
 
 We don't try to harmonize names across formats; each format's natural
 keys (``dc:title``, ``core_creator``, ``exif_Artist``, ``meta_og:description``,

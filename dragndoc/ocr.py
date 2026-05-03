@@ -9,9 +9,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from automafile.config import get_settings
-from automafile.extractors.base import EncryptedDocumentError
-from automafile.log import get_logger
+from dragndoc.config import get_settings
+from dragndoc.extractors.base import EncryptedDocumentError
+from dragndoc.log import get_logger
 
 
 log = get_logger(__name__)

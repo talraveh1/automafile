@@ -1,12 +1,12 @@
-"""Tiny Tk window that displays the rolling automafile.log file.
+"""Tiny Tk window that displays the rolling dragndoc.log file.
 
 Spawned as a subprocess from the toaster's tray "Log" menu so each click
 gets its own Tk root in its own process — no threading conflicts with
 the pystray main thread.
 
-    python -m automafile.log_viewer [path/to/log]
+    python -m dragndoc.log_viewer [path/to/log]
 
-Defaults to ``<storage_dir>/logs/automafile.log`` if no path is given.
+Defaults to ``<storage_dir>/logs/dragndoc.log`` if no path is given.
 """
 
 from __future__ import annotations
@@ -22,8 +22,8 @@ REFRESH_INTERVAL_MS = 1000
 def _resolve_log_path(argv: list[str]) -> Path:
     if len(argv) > 1:
         return Path(argv[1])
-    from automafile.config import get_settings
-    return get_settings().logs_dir / "automafile.log"
+    from dragndoc.config import get_settings
+    return get_settings().logs_dir / "dragndoc.log"
 
 
 def _read_tail(path: Path, max_lines: int) -> str:
@@ -44,7 +44,7 @@ def main(argv: list[str]) -> int:
     log_path = _resolve_log_path(argv)
 
     root = tk.Tk()
-    root.title(f"Automafile log — {log_path.name}")
+    root.title(f"Drag'n'Doc log — {log_path.name}")
     root.geometry("960x540")
 
     auto_refresh = tk.BooleanVar(value=True)

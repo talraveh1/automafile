@@ -1,15 +1,18 @@
-"""Auto-start the Automafile toaster at user logon (no admin required).
+"""Auto-start the Drag'n'Doc toaster at user logon (no admin required).
 
-Drops a shortcut into the user's Startup folder
-(``%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup``) that
-launches the venv's ``pythonw.exe`` with ``-m automafile toaster``. No
-console window flashes, no UAC prompt, no Task Scheduler entry.
+What this does, idempotently:
 
-    python scripts\\toaster.py            # install / refresh
-    python scripts\\toaster.py --status   # show whether the shortcut is present
+1. Drops a shortcut into the user's Startup folder
+   (``%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup``) that
+   launches the venv's ``pythonw.exe`` with ``-m dragndoc toaster``.
+2. Registers ``DragnDoc.Toaster`` as a per-user AUMID under
+   ``HKCU:\\Software\\Classes\\AppUserModelId\\``. Without this, Windows
+   silently drops every toast — windows-toasts succeeds at sending but the
+   notification center never sees it because the AUMID isn't recognised.
+
+    python scripts\\toaster.py            # install / refresh (shortcut + AUMID)
+    python scripts\\toaster.py --status   # show install state
     python scripts\\toaster.py --uninstall
-
-Idempotent: re-running ``install`` overwrites the existing shortcut.
 
 Why not Task Scheduler? ``schtasks /Create /SC ONLOGON`` requires
 elevation; for a personal-project per-user daemon, the Startup folder is
@@ -22,12 +25,20 @@ import argparse
 import os
 import subprocess
 import sys
+import winreg
 from pathlib import Path
 
 
 REPO = Path(__file__).resolve().parent.parent
 VENV = REPO / ".venv"
-SHORTCUT_NAME = "Automafile Toaster.lnk"
+SHORTCUT_NAME = "DragnDoc Toaster.lnk"
+
+# AUMID = Application User Model ID. Must be a single-segment dotted name,
+# 1–129 chars. Windows looks this up under HKCU\Software\Classes\AppUserModelId
+# to attribute toast notifications. Keep this in sync with notifier.AUMID.
+AUMID = "DragnDoc.Toaster"
+AUMID_DISPLAY_NAME = "Drag'n'Doc"
+AUMID_REG_PATH = rf"Software\Classes\AppUserModelId\{AUMID}"
 
 
 def venv_pythonw(venv: Path) -> Path:
@@ -50,7 +61,7 @@ def _ps_quote(s: str) -> str:
     return s.replace("'", "''")
 
 
-def install() -> int:
+def _install_shortcut() -> int:
     pythonw = venv_pythonw(VENV)
     if not pythonw.exists():
         sys.exit(f"venv pythonw.exe not found at {pythonw}\nRun scripts\\install.py first.")
@@ -64,10 +75,10 @@ def install() -> int:
         "$ws = New-Object -ComObject WScript.Shell;"
         f"$lnk = $ws.CreateShortcut('{_ps_quote(str(target))}');"
         f"$lnk.TargetPath = '{_ps_quote(str(pythonw))}';"
-        "$lnk.Arguments = '-m automafile toaster';"
+        "$lnk.Arguments = '-m dragndoc toaster';"
         f"$lnk.WorkingDirectory = '{_ps_quote(str(REPO))}';"
-        "$lnk.WindowStyle = 7;"  # 7 = minimized; pythonw has no window anyway, belt-and-braces
-        "$lnk.Description = 'Tail Automafile events.jsonl and fire Windows toasts.';"
+        "$lnk.WindowStyle = 7;"
+        "$lnk.Description = 'Tail DragnDoc events.jsonl and fire Windows toasts.';"
         "$lnk.Save()"
     )
     result = subprocess.run(
@@ -78,33 +89,63 @@ def install() -> int:
         print(result.stdout, end="")
         print(result.stderr, end="", file=sys.stderr)
         return result.returncode
+    print(f"Installed shortcut: {target}")
+    return 0
 
-    print(f"Installed: {target}")
-    print(f"  target  : {pythonw} -m automafile toaster")
-    print(f"  workdir : {REPO}")
+
+def _register_aumid() -> None:
+    """Create the HKCU AUMID entry so Windows attributes our toasts to it."""
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, AUMID_REG_PATH) as key:
+        winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, AUMID_DISPLAY_NAME)
+    print(f"Registered AUMID: {AUMID} (DisplayName={AUMID_DISPLAY_NAME!r})")
+
+
+def _unregister_aumid() -> None:
+    try:
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, AUMID_REG_PATH)
+        print(f"Unregistered AUMID: {AUMID}")
+    except FileNotFoundError:
+        print(f"AUMID not registered: {AUMID}")
+
+
+def _aumid_registered() -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, AUMID_REG_PATH):
+            return True
+    except FileNotFoundError:
+        return False
+
+
+def install() -> int:
+    rc = _install_shortcut()
+    if rc != 0:
+        return rc
+    _register_aumid()
+    pythonw = venv_pythonw(VENV)
     print()
     print("It will auto-start at the next user logon.")
-    print(f"To start it now: Start-Process '{pythonw}' -ArgumentList '-m','automafile','toaster' -WindowStyle Hidden")
+    print(f"To start it now: Start-Process '{pythonw}' -ArgumentList '-m','dragndoc','toaster' -WindowStyle Hidden")
     return 0
 
 
 def uninstall() -> int:
     target = shortcut_path()
-    if not target.exists():
-        print(f"Not installed: {target}")
-        return 0
-    target.unlink()
-    print(f"Removed: {target}")
+    if target.exists():
+        target.unlink()
+        print(f"Removed shortcut: {target}")
+    else:
+        print(f"Shortcut not installed: {target}")
+    _unregister_aumid()
     return 0
 
 
 def status() -> int:
     target = shortcut_path()
-    if target.exists():
-        print(f"Installed: {target}")
-        return 0
-    print(f"Not installed: {target}")
-    return 1
+    shortcut_ok = target.exists()
+    aumid_ok = _aumid_registered()
+    print(f"Shortcut: {'OK    ' if shortcut_ok else 'MISSING'} {target}")
+    print(f"AUMID:    {'OK    ' if aumid_ok else 'MISSING'} HKCU\\{AUMID_REG_PATH}")
+    return 0 if (shortcut_ok and aumid_ok) else 1
 
 
 def main() -> int:
@@ -112,8 +153,8 @@ def main() -> int:
         sys.exit("This script is Windows-only.")
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--uninstall", action="store_true", help="Remove the Startup shortcut.")
-    parser.add_argument("--status", action="store_true", help="Check whether the shortcut is present.")
+    parser.add_argument("--uninstall", action="store_true", help="Remove the Startup shortcut and AUMID.")
+    parser.add_argument("--status", action="store_true", help="Check shortcut + AUMID registration.")
     args = parser.parse_args()
 
     if args.uninstall:

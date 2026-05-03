@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.metadata import sidecar
-from automafile.metadata.schema import MetadataDoc, OcrBlock
+from dragndoc.metadata import sidecar
+from dragndoc.metadata.schema import MetadataDoc, OcrBlock
 
 
 def _build_meta(file_path: Path) -> MetadataDoc:
-    from automafile.metadata.hashing import hash_file
+    from dragndoc.metadata.hashing import hash_file
     return MetadataDoc(
         content_hash=hash_file(file_path),
         file_size=file_path.stat().st_size,

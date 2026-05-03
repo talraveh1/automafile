@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.config import get_settings
-from automafile.extractors._caps import CapConfig, trim_to_word_boundary
-from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
+from dragndoc.config import get_settings
+from dragndoc.extractors._caps import CapConfig, trim_to_word_boundary
+from dragndoc.extractors._meta import collect
+from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # python-docx CoreProperties attributes — these are the OOXML core

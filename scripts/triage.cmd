@@ -1,5 +1,5 @@
 @echo off
-REM Launch an interactive Claude Code session inside the automafile container
+REM Launch an interactive Claude Code session inside the dragndoc container
 REM and immediately run /triage. You stay attached and see every action.
 REM
 REM Permissions are pre-skipped (--dangerously-skip-permissions). Safe here
@@ -9,7 +9,7 @@ setlocal
 
 cd /d "%~dp0\.."
 
-set "SERVICE=automafile"
+set "SERVICE=dragndoc"
 set "PROMPT=%~1"
 if "%PROMPT%"=="" set "PROMPT=/triage"
 

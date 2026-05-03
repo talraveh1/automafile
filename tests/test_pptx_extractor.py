@@ -8,7 +8,7 @@ import pytest
 def test_pptx_slides_become_sections(tmp_path):
     pptx_lib = pytest.importorskip("pptx")
     from pptx.util import Inches
-    from automafile.extractors import pptx as pptx_ext
+    from dragndoc.extractors import pptx as pptx_ext
 
     path = tmp_path / "deck.pptx"
     pres = pptx_lib.Presentation()

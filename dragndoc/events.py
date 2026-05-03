@@ -1,7 +1,7 @@
 """Append-only JSONL event journal consumed by the toaster sidecar.
 
 Decouples notification from the pipeline: the watcher / sidecar writes
-events here; a separate `automafile toaster` process tails the file and
+events here; a separate `dnd toaster` process tails the file and
 fires Windows toasts. Lets the toaster run on the host even when the
 pipeline runs in a container.
 """
@@ -14,8 +14,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from automafile.config import get_settings
-from automafile.log import get_logger
+from dragndoc.config import get_settings
+from dragndoc.log import get_logger
 
 
 log = get_logger(__name__)

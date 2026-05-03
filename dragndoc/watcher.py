@@ -9,10 +9,10 @@ from threading import Lock
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
-from automafile.config import get_settings
-from automafile.log import get_logger
-from automafile.events import append as append_event
-from automafile.pipeline import format_result_line, process_file
+from dragndoc.config import get_settings
+from dragndoc.log import get_logger
+from dragndoc.events import append as append_event
+from dragndoc.pipeline import format_result_line, process_file
 
 
 log = get_logger(__name__)
@@ -98,7 +98,7 @@ def run_watcher() -> None:
     observer.schedule(handler, str(settings.inbox_path), recursive=True)
     observer.start()
     log.info("Watching %s (polling every %.1fs)", settings.inbox_path, settings.watch_polling_interval)
-    print(f"[automafile] Watching {settings.inbox_path}; Ctrl-C to stop.")
+    print(f"[dragndoc] Watching {settings.inbox_path}; Ctrl-C to stop.")
     try:
         while True:
             time.sleep(1)

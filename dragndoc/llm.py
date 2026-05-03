@@ -10,9 +10,9 @@ from typing import Any
 
 import requests
 
-from automafile.config import get_settings
-from automafile.extractors.base import ExtractedDoc, Section
-from automafile.log import get_logger
+from dragndoc.config import get_settings
+from dragndoc.extractors.base import ExtractedDoc, Section
+from dragndoc.log import get_logger
 
 
 log = get_logger(__name__)

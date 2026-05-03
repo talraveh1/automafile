@@ -12,10 +12,10 @@ from typing import Any
 
 import yaml
 
-from automafile.config import get_settings
-from automafile.log import get_logger
-from automafile.metadata.hashing import hash_file
-from automafile.metadata.schema import MetadataDoc, utc_now_iso
+from dragndoc.config import get_settings
+from dragndoc.log import get_logger
+from dragndoc.metadata.hashing import hash_file
+from dragndoc.metadata.schema import MetadataDoc, utc_now_iso
 
 
 log = get_logger(__name__)
@@ -129,7 +129,7 @@ def _quarantine(spath: Path, reason: str) -> None:
         return
     # lazy import to dodge potential import cycles via config
     try:
-        from automafile.events import append as append_event
+        from dragndoc.events import append as append_event
         append_event(
             "quarantined",
             file=f"{spath.parent.parent.name}/{spath.name}",
@@ -190,7 +190,7 @@ def build_meta_doc_for_new_file(
         "filename_at_creation": file_path.name,
         "relative_path": relative_to_root(file_path),
         "metadata_modified": utc_now_iso(),
-        "metadata_modified_by": "automafile-watcher 0.1.0",
+        "metadata_modified_by": "dragndoc-watcher 0.1.0",
     }
     base.update({k: v for k, v in enrichment_dict.items() if k != "summary"})
     if ocr_block:
@@ -221,3 +221,28 @@ def update_relative_path(file_path: Path, new_path: Path) -> None:
     if old_sidecar != new_sidecar and old_sidecar.exists():
         old_sidecar.unlink()
         log.debug("sidecar moved: %s -> %s", old_sidecar, new_sidecar)
+
+
+def copy_to(file_path: Path, new_path: Path) -> None:
+    """Copy a sidecar so a duplicate sits next to ``new_path`` and points at it; original is left in place."""
+    import shutil
+
+    settings = get_settings()
+    old_sidecar = sidecar_path_for(file_path)
+    new_sidecar = sidecar_path_for(new_path)
+    if not old_sidecar.exists():
+        return
+    new_sidecar.parent.mkdir(parents=True, exist_ok=True)
+    _hide_directory(new_sidecar.parent)
+    doc, summary, notes = read(file_path)
+    if doc is None:
+        shutil.copy2(old_sidecar, new_sidecar)
+        return
+    try:
+        rel = str(new_path.relative_to(settings.documents_root)).replace("\\", "/")
+    except ValueError:
+        rel = str(new_path).replace("\\", "/")
+    doc.relative_path = rel
+    doc.metadata_modified = utc_now_iso()
+    write(new_path, doc, summary, notes)
+    log.debug("sidecar copied: %s -> %s", old_sidecar, new_sidecar)

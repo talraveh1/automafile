@@ -1,4 +1,4 @@
-"""Bootstrap Automafile: create a venv, install editable, run automafile bootstrap.
+"""Bootstrap Drag'n'Doc: create a venv, install editable, run dnd bootstrap.
 
 Run with the system Python 3.12+:
 
@@ -43,14 +43,14 @@ def main() -> int:
 
     run([py, "-m", "pip", "install", "--upgrade", "pip"])
     run([py, "-m", "pip", "install", "-e", ".[dev]"], cwd=REPO)
-    run([py, "-m", "automafile", "bootstrap"], cwd=REPO)
+    run([py, "-m", "dragndoc", "bootstrap"], cwd=REPO)
 
     print()
     print("Bootstrap complete. Next steps:")
     print(f"  1. Edit {REPO / 'config.jsonc'} if your defaults differ.")
     print("  2. Pin <documents_root>\\<inbox_dir> to 'Always keep on this device' in OneDrive.")
-    print(f"  3. Start the watcher: {py} -m automafile watch")
-    print(f"  4. Start the toaster (separate terminal): {py} -m automafile toaster")
+    print(f"  3. Start the watcher: {py} -m dragndoc watch")
+    print(f"  4. Start the toaster (separate terminal): {py} -m dragndoc toaster")
     print( "     (or run 'python scripts\\toaster.py' to auto-start it at logon)")
     return 0
 

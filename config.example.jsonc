@@ -1,4 +1,4 @@
-// Automafile runtime configuration.
+// Drag'n'Doc runtime configuration.
 //
 // Copy this file to config.jsonc and adjust to your environment.
 // Environment variables (uppercase form of each key) override these values.

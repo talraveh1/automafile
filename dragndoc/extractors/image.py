@@ -11,12 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from automafile.config import get_settings
-from automafile.extractors._caps import CapConfig, select_pages
-from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
-from automafile.log import get_logger
-from automafile.ocr import ocr_image, tesseract_available
+from dragndoc.config import get_settings
+from dragndoc.extractors._caps import CapConfig, select_pages
+from dragndoc.extractors._meta import collect
+from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
+from dragndoc.log import get_logger
+from dragndoc.ocr import ocr_image, tesseract_available
 
 
 log = get_logger(__name__)

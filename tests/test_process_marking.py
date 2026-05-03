@@ -1,4 +1,4 @@
-"""Tests for the worklist-marking behavior of ``automafile process``.
+"""Tests for the worklist-marking behavior of ``dnd process``.
 
 Each successful per-file process stamps a ``processed`` ISO timestamp on
 every entry that referenced it (across however many worklists the entry
@@ -19,8 +19,8 @@ from unittest.mock import patch
 import pytest
 from typer.testing import CliRunner
 
-from automafile.cli import app
-from automafile.llm import EnrichmentResult
+from dragndoc.cli import app
+from dragndoc.llm import EnrichmentResult
 
 
 runner = CliRunner()
@@ -70,7 +70,7 @@ def _seed_files(docs_root: Path, names: list[str]) -> list[Path]:
 
 def _scan_dir(docs_root: Path) -> Path:
     # conftest sets STORAGE_DIR = tmp_path / "storage"
-    from automafile.config import get_settings
+    from dragndoc.config import get_settings
     return get_settings().scan_dir
 
 
@@ -78,7 +78,7 @@ def test_successful_run_marks_each_entry_with_timestamp(docs_root):
     _seed_files(docs_root, ["a.txt", "b.txt"])
     wl = _write_worklist(_scan_dir(docs_root), "scan-1.json", docs_root,
                          ["Inbox/a.txt", "Inbox/b.txt"])
-    with patch("automafile.pipeline.enrich", return_value=_FAKE):
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         res = runner.invoke(app, ["process", str(wl)])
     assert res.exit_code == 0, res.output
     data = json.loads(wl.read_text(encoding="utf-8"))
@@ -103,7 +103,7 @@ def test_failed_file_is_not_marked(docs_root):
             raise RuntimeError("boom")
         return real_enrich
 
-    with patch("automafile.pipeline.enrich", side_effect=fake_enrich):
+    with patch("dragndoc.pipeline.enrich", side_effect=fake_enrich):
         res = runner.invoke(app, ["process", str(wl)])
     # explicit-mode keeps the file even with failures
     assert wl.exists()
@@ -117,7 +117,7 @@ def test_second_run_skips_already_processed(docs_root):
     _seed_files(docs_root, ["a.txt"])
     wl = _write_worklist(_scan_dir(docs_root), "scan-1.json", docs_root, ["Inbox/a.txt"])
 
-    with patch("automafile.pipeline.enrich", return_value=_FAKE) as mock_enrich:
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE) as mock_enrich:
         res1 = runner.invoke(app, ["process", str(wl)])
         assert res1.exit_code == 0
         first_call_count = mock_enrich.call_count
@@ -134,7 +134,7 @@ def test_modified_file_is_re_processed_without_force(docs_root):
     [path] = _seed_files(docs_root, ["a.txt"])
     wl = _write_worklist(_scan_dir(docs_root), "scan-1.json", docs_root, ["Inbox/a.txt"])
 
-    with patch("automafile.pipeline.enrich", return_value=_FAKE) as mock_enrich:
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE) as mock_enrich:
         res1 = runner.invoke(app, ["process", str(wl)])
         assert res1.exit_code == 0
 
@@ -153,7 +153,7 @@ def test_force_flag_re_processes_unmodified_file(docs_root):
     _seed_files(docs_root, ["a.txt"])
     wl = _write_worklist(_scan_dir(docs_root), "scan-1.json", docs_root, ["Inbox/a.txt"])
 
-    with patch("automafile.pipeline.enrich", return_value=_FAKE) as mock_enrich:
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE) as mock_enrich:
         runner.invoke(app, ["process", str(wl)])
         n1 = mock_enrich.call_count
         res = runner.invoke(app, ["process", str(wl), "--force"])
@@ -165,7 +165,7 @@ def test_force_flag_re_processes_unmodified_file(docs_root):
 def test_dry_run_does_not_mark(docs_root):
     _seed_files(docs_root, ["a.txt"])
     wl = _write_worklist(_scan_dir(docs_root), "scan-1.json", docs_root, ["Inbox/a.txt"])
-    with patch("automafile.pipeline.enrich", return_value=_FAKE):
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         res = runner.invoke(app, ["process", str(wl), "--dry-run"])
     assert res.exit_code == 0
     data = json.loads(wl.read_text(encoding="utf-8"))
@@ -185,7 +185,7 @@ def test_atomic_write_persists_after_each_file(docs_root):
             raise RuntimeError("simulated crash")
         return _FAKE
 
-    with patch("automafile.pipeline.enrich", side_effect=crashy):
+    with patch("dragndoc.pipeline.enrich", side_effect=crashy):
         # catch_exceptions=False so the RuntimeError propagates out of the
         # CLI and we can prove the per-file rewrite already landed before it.
         with pytest.raises(RuntimeError, match="simulated crash"):
@@ -204,7 +204,7 @@ def test_mark_propagates_across_multiple_worklists(docs_root):
     wl1 = _write_worklist(scan, "scan-1.json", docs_root, ["Inbox/a.txt"])
     wl2 = _write_worklist(scan, "scan-2.json", docs_root, ["Inbox/a.txt"])
 
-    with patch("automafile.pipeline.enrich", return_value=_FAKE):
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         # no-arg form sweeps both
         res = runner.invoke(app, ["process"])
     # both wl1 and wl2 are deleted on success in no-arg mode, so we can't
@@ -219,7 +219,7 @@ def test_mark_propagates_across_multiple_worklists_explicit(docs_root):
     wl1 = _write_worklist(scan, "scan-1.json", docs_root, ["Inbox/a.txt"])
     wl2 = _write_worklist(scan, "scan-2.json", docs_root, ["Inbox/a.txt"])
 
-    with patch("automafile.pipeline.enrich", return_value=_FAKE):
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         res = runner.invoke(app, ["process", str(wl1)])
 
     assert res.exit_code == 0
@@ -234,7 +234,7 @@ def test_skipped_message_when_all_already_processed(docs_root):
     _seed_files(docs_root, ["a.txt", "b.txt"])
     wl = _write_worklist(_scan_dir(docs_root), "scan-1.json", docs_root,
                          ["Inbox/a.txt", "Inbox/b.txt"])
-    with patch("automafile.pipeline.enrich", return_value=_FAKE):
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         runner.invoke(app, ["process", str(wl)])
         res = runner.invoke(app, ["process", str(wl)])
     assert res.exit_code == 0

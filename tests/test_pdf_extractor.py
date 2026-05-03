@@ -26,7 +26,7 @@ def _write_text_pdf(path: Path, page_texts: list[str]) -> None:
 
 
 def test_pdf_caps_hundred_pages_to_five_sections(tmp_path, monkeypatch):
-    from automafile.extractors import pdf as pdf_ext
+    from dragndoc.extractors import pdf as pdf_ext
 
     monkeypatch.setattr(pdf_ext, "tesseract_available", lambda: False)
     path = tmp_path / "many.pdf"
@@ -39,7 +39,7 @@ def test_pdf_caps_hundred_pages_to_five_sections(tmp_path, monkeypatch):
 
 
 def test_pdf_keeps_two_page_document(tmp_path, monkeypatch):
-    from automafile.extractors import pdf as pdf_ext
+    from dragndoc.extractors import pdf as pdf_ext
 
     monkeypatch.setattr(pdf_ext, "tesseract_available", lambda: False)
     path = tmp_path / "two.pdf"
@@ -51,7 +51,7 @@ def test_pdf_keeps_two_page_document(tmp_path, monkeypatch):
 
 
 def test_pdf_thin_pages_expand_to_max(tmp_path, monkeypatch):
-    from automafile.extractors import pdf as pdf_ext
+    from dragndoc.extractors import pdf as pdf_ext
 
     monkeypatch.setattr(pdf_ext, "tesseract_available", lambda: False)
     path = tmp_path / "thin.pdf"
@@ -62,8 +62,8 @@ def test_pdf_thin_pages_expand_to_max(tmp_path, monkeypatch):
 
 
 def test_pdf_fat_first_page_is_trimmed_but_min_pages_are_kept(tmp_path, monkeypatch):
-    from automafile.config import reset_settings
-    from automafile.extractors import pdf as pdf_ext
+    from dragndoc.config import reset_settings
+    from dragndoc.extractors import pdf as pdf_ext
 
     monkeypatch.setattr(pdf_ext, "tesseract_available", lambda: False)
     monkeypatch.setenv("EXTRACTION_TARGET_CHARS", "1500")

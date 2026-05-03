@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from automafile.dispatch import EXT_MAP, extract as dispatch_extract, get_extractor
-from automafile.extractors import (
+from dragndoc.dispatch import EXT_MAP, extract as dispatch_extract, get_extractor
+from dragndoc.extractors import (
     docx as docx_ext,
     image as image_ext,
     pdf as pdf_ext,
     text as text_ext,
 )
-from automafile.extractors.base import CorruptDocumentError
+from dragndoc.extractors.base import CorruptDocumentError
 
 
 def test_text_extension_maps_to_text(tmp_path):
@@ -69,8 +69,8 @@ def test_unknown_extension_falls_back(tmp_path):
 
 def test_dispatch_retries_sniffed_mime_after_bad_text_extension(tmp_path, monkeypatch):
     pikepdf = pytest.importorskip("pikepdf")
-    from automafile.extractors import pdf as pdf_module
-    import automafile.dispatch as dispatch
+    from dragndoc.extractors import pdf as pdf_module
+    import dragndoc.dispatch as dispatch
 
     p = tmp_path / "renamed.txt"
     pdf = pikepdf.new()
@@ -86,7 +86,7 @@ def test_dispatch_retries_sniffed_mime_after_bad_text_extension(tmp_path, monkey
 
 
 def test_dispatch_uses_sniffed_mime_for_unknown_extension(tmp_path, monkeypatch):
-    import automafile.dispatch as dispatch
+    import dragndoc.dispatch as dispatch
 
     p = tmp_path / "data.blob"
     p.write_text("plain text despite the extension", encoding="utf-8")
@@ -98,7 +98,7 @@ def test_dispatch_uses_sniffed_mime_for_unknown_extension(tmp_path, monkeypatch)
 
 
 def test_dispatch_falls_back_to_unknown_when_known_parser_and_sniff_fail(tmp_path, monkeypatch):
-    import automafile.dispatch as dispatch
+    import dragndoc.dispatch as dispatch
 
     p = tmp_path / "not-a-pdf.pdf"
     p.write_text("plain fallback body", encoding="utf-8")

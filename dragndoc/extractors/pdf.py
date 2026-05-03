@@ -5,17 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from automafile.config import get_settings
-from automafile.extractors._caps import CapConfig, select_pages
-from automafile.extractors._meta import collect
-from automafile.extractors.base import (
+from dragndoc.config import get_settings
+from dragndoc.extractors._caps import CapConfig, select_pages
+from dragndoc.extractors._meta import collect
+from dragndoc.extractors.base import (
     CorruptDocumentError,
     EncryptedDocumentError,
     ExtractedDoc,
     Section,
 )
-from automafile.log import get_logger
-from automafile.ocr import run_ocr, should_ocr_page, tesseract_available
+from dragndoc.log import get_logger
+from dragndoc.ocr import run_ocr, should_ocr_page, tesseract_available
 
 
 log = get_logger(__name__)
@@ -29,7 +29,7 @@ _XMP_NS_PREFIX = {
     "http://ns.adobe.com/pdfx/1.3/": "pdfx",
     "http://ns.adobe.com/photoshop/1.0/": "photoshop",
     "http://www.w3.org/1999/02/22-rdf-syntax-ns#": "rdf",
-    "http://automafile.local/schema/1.0/": "automafile",
+    "http://dragndoc.local/schema/1.0/": "dragndoc",
 }
 
 

@@ -1,12 +1,12 @@
-# Automafile v2 — Python-only rewrite, detailed implementation plan
+# Drag'n'Doc v2 — Python-only rewrite, detailed implementation plan
 
 ## Context
 
 The previous implementation built around Paperless-ngx is being retired. Paperless's "I own the files" model conflicts with the user's stated requirement: files must live in their own filesystem, be renameable/moveable outside any tool, and the metadata layer must be a helper, not a portal.
 
-The replacement is a thin Python pipeline that watches a folder, extracts text from each file (using OCR only when needed), asks a local Ollama LLM for tags + category + summary, and writes that information to a Markdown sidecar in a hidden `.meta/` subfolder next to the file. **Original documents are never modified** — the sidecar is always the only source of truth. A separate Claude Code skill named `/triage` decides where each file is filed (folder + smart filename), informed by project-local memory of the user's preferences and prior corrections. Moves go through `python -m automafile mv` (or `filer-apply`) so the sidecar always travels with the file.
+The replacement is a thin Python pipeline that watches a folder, extracts text from each file (using OCR only when needed), asks a local Ollama LLM for tags + category + summary, and writes that information to a Markdown sidecar in a hidden `.meta/` subfolder next to the file. **Original documents are never modified** — the sidecar is always the only source of truth. A separate Claude Code skill named `/triage` decides where each file is filed (folder + smart filename), informed by project-local memory of the user's preferences and prior corrections. Moves go through `python -m dragndoc mv` (or `filer-apply`) so the sidecar always travels with the file.
 
-**This plan is for a new agent starting from a fresh empty directory.** Do not reuse anything from the existing `d:\automafile` repo — it has Docker, PowerShell, Paperless integration, and other obsolete leftovers. Reference it only to copy across the prompt template, the memory file shapes, and the `/triage` SKILL.md skeleton, all of which translate cleanly.
+**This plan is for a new agent starting from a fresh empty directory.** Do not reuse anything from the existing `d:\dragndoc` repo — it has Docker, PowerShell, Paperless integration, and other obsolete leftovers. Reference it only to copy across the prompt template, the memory file shapes, and the `/triage` SKILL.md skeleton, all of which translate cleanly.
 
 ## Prerequisites
 
@@ -50,9 +50,9 @@ The replacement is a thin Python pipeline that watches a folder, extracts text f
 ├── .python-version
 ├── .env.example
 ├── CLAUDE.md                    # project-scoped Claude instructions
-├── automafile/                  # the Python package
+├── dragndoc/                  # the Python package
 │   ├── __init__.py
-│   ├── __main__.py              # enables `python -m automafile`
+│   ├── __main__.py              # enables `python -m dragndoc`
 │   ├── cli.py                   # typer entry points
 │   ├── config.py                # .env loader, paths, defaults
 │   ├── log.py                   # logging setup, single source
@@ -94,7 +94,7 @@ The replacement is a thin Python pipeline that watches a folder, extracts text f
 │           └── SKILL.md
 ├── scripts/
 │   ├── install.ps1              # bootstrap helper
-│   └── run-watcher.ps1          # tiny wrapper around `python -m automafile watch`
+│   └── run-watcher.ps1          # tiny wrapper around `python -m dragndoc watch`
 ├── storage/                     # gitignored, runtime
 │   ├── scan/                    # scan-<ts>.json, review-<ts>.json
 │   └── logs/
@@ -143,7 +143,7 @@ OLLAMA_MODEL=aya-expanse:8b
 # paths (Windows-style; pipeline uses Path which handles them)
 DOCUMENTS_ROOT=C:\Users\trax7\OneDrive\Documents
 INBOX_DIR=Inbox
-MANAGED_DIR=Automafile
+MANAGED_DIR=DragnDoc
 
 # OCR
 TESSERACT_LANGS=heb+eng
@@ -160,8 +160,8 @@ TOAST_PORT=8765                # listener port (currently unused; reserved for f
 
 ## pyproject.toml essentials
 
-- Project name `automafile`, version `0.1.0`.
-- Console scripts: `automafile = "automafile.cli:app"` (so `automafile <subcommand>` works after `pip install -e .`).
+- Project name `dragndoc`, version `0.1.0`.
+- Console scripts: `dragndoc = "dragndoc.cli:app"` (so `dragndoc <subcommand>` works after `pip install -e .`).
 - Pin `python_requires = ">=3.12"`.
 - Dependencies as listed in the Stack section, with reasonable lower bounds.
 
@@ -210,7 +210,7 @@ ocr:
   engine_version: null
   languages: null
 metadata_modified: 2026-05-01T10:22:33Z
-metadata_modified_by: automafile-watcher 0.1.0
+metadata_modified_by: dragndoc-watcher 0.1.0
 filed_at: null
 filed_path: null
 ---
@@ -313,7 +313,7 @@ memory/
 
 ## Components — what each script does
 
-### `automafile/config.py`
+### `dragndoc/config.py`
 
 - Read `.env` via `python-dotenv` or stdlib parsing.
 - Resolve all paths to absolute `Path` objects.
@@ -321,13 +321,13 @@ memory/
 - Expose `documents_root`, `inbox_dir`, `managed_dir`, `meta_subfolder` (default `.meta`), `tesseract_langs`, `ollama_url`, `ollama_model`, etc.
 - One source of truth — every other module imports from here.
 
-### `automafile/dispatch.py`
+### `dragndoc/dispatch.py`
 
 - Function `extract(path: Path) -> ExtractedDoc`.
 - Maps extension → extractor module, with `python-magic` fallback for unknown extensions.
 - Returns a uniform `ExtractedDoc(text: str, ocr_used: bool, ocr_decision: str, format: str, ...)`.
 
-### `automafile/extractors/*.py`
+### `dragndoc/extractors/*.py`
 
 Each extractor:
 
@@ -338,13 +338,13 @@ Each extractor:
 - For Office: extract text via `python-docx` / `openpyxl` / `python-pptx`.
 - For text/HTML/EPUB/Markdown: direct read.
 
-### `automafile/ocr.py`
+### `dragndoc/ocr.py`
 
 - `pdf_ocr_decision(path) -> Literal["ocr_full", "ocr_pages", "no_ocr", "skip_encrypted"]` (plus the page list for `ocr_pages`).
 - `run_ocr(path, langs="heb+eng") -> str` — for images: `pytesseract.image_to_string`; for PDFs: rasterize pages via `pdf2image`, OCR each, join.
 - `record_ocr_metadata(meta, langs, engine_version, decision)` — fills the `ocr` block.
 
-### `automafile/llm.py`
+### `dragndoc/llm.py`
 
 - `enrich(text: str, hints: dict) -> EnrichmentResult` where `hints` includes existing metadata, file path, mime, etc.
 - Builds the prompt from `prompts/triage.txt` (a copy of the prompt that lived in the previous repo's `config/router-second-pass-prompt.txt`, adapted to the new schema).
@@ -358,7 +358,7 @@ Each extractor:
   5. placeholder result with `category=unknown`, `confidence=low`, `review=true` so the file still lands in the metadata, never disappears.
 - Returns the tier label so the watcher can log it.
 
-### `automafile/metadata/sidecar.py`
+### `dragndoc/metadata/sidecar.py`
 
 - The single metadata writer/reader. Every file gets a sidecar.
 - Lives in `<file_dir>/.meta/<filename>.<ext>.md`.
@@ -368,22 +368,22 @@ Each extractor:
 - Hash: SHA-256 of the *file content*, prefixed with `sha256:`.
 - Corrupt sidecars are quarantined (`<name>.broken-<ts>`) rather than overwritten on the next write.
 
-### `automafile/metadata/reconcile.py`
+### `dragndoc/metadata/reconcile.py`
 
 - `find_orphans(documents_root) -> list[OrphanReport]` — scans for sidecars whose described file is missing.
 - For each orphan, computes a SHA-256 index of all files in the tree (cached on `(mtime, size)`) to find hash matches.
 - Returns the candidates; **does not** auto-relink. The decision is `/triage`'s.
 
-### `automafile/scanner.py`
+### `dragndoc/scanner.py`
 
 - Walks `documents_root` once.
 - For each file, evaluates: needs OCR? has metadata? metadata stale? metadata partial? OCR config changed?
 - Caches `(path, mtime, size, content_hash, ocr_engine, ocr_languages, metadata_modified)` in `storage/scan/.cache.json` so subsequent runs are fast.
 - Re-hashes only files where `(mtime, size)` differs from cache.
 - Emits a worklist JSON (schema above) and prints a one-line summary.
-- CLI: `automafile scan` writes the worklist; `automafile scan --json` prints it instead.
+- CLI: `dnd scan` writes the worklist; `dnd scan --json` prints it instead.
 
-### `automafile/watcher.py`
+### `dragndoc/watcher.py`
 
 - `watchdog.observers.PollingObserver` (polling, because Windows-bind-mount + OneDrive events are unreliable through native APIs in some setups; polling is safe and our throughput is low).
 - Watches `documents_root/inbox_dir` recursively.
@@ -396,7 +396,7 @@ Each extractor:
   5. Log per-file line: `relative_path | ocr=<decision> | tier=<llm_tier> | category=<x> | duration=<ms>`.
   6. Best-effort fire toast.
 
-### `automafile/filer.py`
+### `dragndoc/filer.py`
 
 The actions invoked by `/triage`:
 
@@ -406,36 +406,36 @@ The actions invoked by `/triage`:
 - Re-anchors the sidecar's `relative_path` field to the new location.
 - Re-hashes (file content unchanged, hash unchanged unless the move involved a re-encoding — which it doesn't).
 - Updates `metadata_modified`, sets `filed_at` and `filed_path`.
-- For native-metadata-bearing files, also updates the in-file `automafile:Category` and `xmp:MetadataDate`.
+- For native-metadata-bearing files, also updates the in-file `dragndoc:Category` and `xmp:MetadataDate`.
 - Idempotent: if target exists with the same hash, no-op. If target exists with a different hash, raises `TargetCollision` for the caller to handle.
 
-### `automafile/notifier.py`
+### `dragndoc/notifier.py`
 
 - `notify(title, body)` — uses `windows-toasts` if installed; falls back to `print` if not.
 - Debounce: if called more than once within `5s`, coalesce subsequent calls into one toast at the end of the burst.
 
-### `automafile/cli.py`
+### `dragndoc/cli.py`
 
 Typer app with these commands:
 
 | Command | Purpose |
 |---|---|
-| `automafile watch` | Start the watcher (foreground; user backgrounds it via Task Scheduler or NSSM). |
-| `automafile process [<path>]` | Process a worklist (default: sweep `storage/scan/`) or a single file. Each successfully-processed worklist entry is stamped with a ``processed`` ISO timestamp and the JSON is atomically rewritten after every file (flush + fsync + rename), so a crash mid-run keeps the marks already made. Subsequent runs skip entries whose mark is at-or-after the file's mtime; pass ``--force`` to redo regardless. Failures are never marked and are retried next run. |
-| `automafile ocr <path>` | Force OCR on a file regardless of decision. |
-| `automafile scan` | Run scanner; write worklist to `storage/scan/scan-<ts>.json`. |
-| `automafile review-ocr` | Walk `ocr_review_candidates` interactively; for each, ask y/n. On y: re-OCR. On n: bump `metadata_modified`. |
-| `automafile reconcile` | Walk orphan sidecars interactively; for each, propose hash-matched relocation. |
-| `automafile inspect [<path>]` | Read-only JSON dump of sidecar metadata. Default scope: walk the inbox. Used by `/triage`. |
-| `automafile mv <src> <dst> [-f]` | Move a file together with its sidecar. Fails if either target exists, unless `-f`. |
-| `automafile filer-apply` | Category-based move: composes `<documents_root>/<category>[/<sub>]/<name>` and refreshes sidecar fields after the move. |
-| `automafile bootstrap` | Create memory templates, seed taxonomy if absent. |
+| `dnd watch` | Start the watcher (foreground; user backgrounds it via Task Scheduler or NSSM). |
+| `dnd process [<path>]` | Process a worklist (default: sweep `storage/scan/`) or a single file. Each successfully-processed worklist entry is stamped with a ``processed`` ISO timestamp and the JSON is atomically rewritten after every file (flush + fsync + rename), so a crash mid-run keeps the marks already made. Subsequent runs skip entries whose mark is at-or-after the file's mtime; pass ``--force`` to redo regardless. Failures are never marked and are retried next run. |
+| `dnd ocr <path>` | Force OCR on a file regardless of decision. |
+| `dnd scan` | Run scanner; write worklist to `storage/scan/scan-<ts>.json`. |
+| `dnd review-ocr` | Walk `ocr_review_candidates` interactively; for each, ask y/n. On y: re-OCR. On n: bump `metadata_modified`. |
+| `dnd reconcile` | Walk orphan sidecars interactively; for each, propose hash-matched relocation. |
+| `dnd inspect [<path>]` | Read-only JSON dump of sidecar metadata. Default scope: walk the inbox. Used by `/triage`. |
+| `dnd mv <src> <dst> [-f]` | Move a file together with its sidecar. Fails if either target exists, unless `-f`. |
+| `dnd filer-apply` | Category-based move: composes `<documents_root>/<category>[/<sub>]/<name>` and refreshes sidecar fields after the move. |
+| `dnd bootstrap` | Create memory templates, seed taxonomy if absent. |
 
 Every command takes `--documents-root` to override the env, and `--dry-run` where it makes sense.
 
 ## Memory directory seeding
 
-`scripts/install.ps1` (or `automafile bootstrap`) writes these once if absent. Use the previous repo's `d:\automafile\memory\` as a reference for content; structurally identical, just adjusted to drop Paperless-specific language.
+`scripts/install.ps1` (or `dnd bootstrap`) writes these once if absent. Use the previous repo's `d:\dragndoc\memory\` as a reference for content; structurally identical, just adjusted to drop Paperless-specific language.
 
 - `memory/pointer.md` — one-line index, references the others.
 - `memory/preferences.md` — templated free-form rules with the keys listed in "Memory schema" above. Default values pre-filled.
@@ -445,7 +445,7 @@ Every command takes `--documents-root` to override the env, and `--dry-run` wher
 ## Project CLAUDE.md
 
 ```markdown
-# Automafile project instructions
+# Drag'n'Doc project instructions
 
 ## Memory
 
@@ -453,7 +453,7 @@ Project-local memory lives in `memory/` (gitignored). When working on filing dec
 
 ## Architecture
 
-Files live in the user's filesystem under `<DOCUMENTS_ROOT>/<INBOX_DIR>` and `<DOCUMENTS_ROOT>/<MANAGED_DIR>`. The Python pipeline (under `automafile/`) extracts text, runs OCR when needed, calls Ollama for enrichment, and writes metadata to a `.meta/<filename>.md` sidecar — every file gets one. Original documents are never modified. The `/triage` skill decides where each file is filed; moves go through `automafile mv` (or `filer-apply`) so the sidecar always travels with the file.
+Files live in the user's filesystem under `<DOCUMENTS_ROOT>/<INBOX_DIR>` and `<DOCUMENTS_ROOT>/<MANAGED_DIR>`. The Python pipeline (under `dragndoc/`) extracts text, runs OCR when needed, calls Ollama for enrichment, and writes metadata to a `.meta/<filename>.md` sidecar — every file gets one. Original documents are never modified. The `/triage` skill decides where each file is filed; moves go through `dnd mv` (or `filer-apply`) so the sidecar always travels with the file.
 
 ## Skill scope
 
@@ -479,19 +479,19 @@ Workflow (mirrors the v1 skill in spirit; differences flagged):
 2. **Drift / orphan review** — for orphan sidecars in the latest scan, propose relinks (hash-matched candidates) and apply user's choices.
 3. **Build the queue** — files in `<INBOX_DIR>` (not yet filed) AND files flagged in scan worklist as `needs_metadata` / `partial_metadata` / `stale_metadata`. Sort by oldest-first.
 4. **For each doc:**
-   - Read its sidecar via `automafile inspect <path>` (always JSON, read-only).
+   - Read its sidecar via `dnd inspect <path>` (always JSON, read-only).
    - If summary present and ≥100 chars → use it.
-   - Else, `automafile process <path>` to generate the sidecar in-place. (Calls back into the Python pipeline; cheap when OCR isn't needed.)
+   - Else, `dnd process <path>` to generate the sidecar in-place. (Calls back into the Python pipeline; cheap when OCR isn't needed.)
    - If still empty/unusable → ask the user for guidance.
 5. **Decide** filing: `category`, optional `subcategory`, `smart_name`. Apply preferences-md rules and corrections.jsonl precedents.
 6. **Auto-apply gate** — same four conditions as v1: `confidence-high`, no review-needed, category exists in taxonomy, taxonomy unchanged since enrichment.
-7. **Apply** — call `automafile process` if needed to refresh the sidecar; then either `automafile filer-apply --path <path> --category <c> --subcategory <s> --name <smart>` for category-based filing, or `automafile mv <src> <dst>` for ad-hoc relocations. Both move the file and its sidecar together. Never use raw `mv`/`move`.
+7. **Apply** — call `dnd process` if needed to refresh the sidecar; then either `dnd filer-apply --path <path> --category <c> --subcategory <s> --name <smart>` for category-based filing, or `dnd mv <src> <dst>` for ad-hoc relocations. Both move the file and its sidecar together. Never use raw `mv`/`move`.
 8. **Cluster + propose new categories** — same threshold rule (≥3 docs, single docs never spawn).
 9. **Learn** — append corrections to `memory/corrections.jsonl`. Propose new `preferences.md` rules after 3 similar corrections.
-10. **OCR review** — at end of session, surface `ocr_review_candidates` from the scan; for each, ask user; on yes, run `automafile ocr`; on no, bump `metadata_modified` so it doesn't reappear.
+10. **OCR review** — at end of session, surface `ocr_review_candidates` from the scan; for each, ask user; on yes, run `dnd ocr`; on no, bump `metadata_modified` so it doesn't reappear.
 11. **Wrap up** — write `memory/last-triage.json`, single-line summary.
 
-The skill talks to the pipeline via the `automafile` CLI for any state-changing action. It doesn't reach into Python internals.
+The skill talks to the pipeline via the `dragndoc` CLI for any state-changing action. It doesn't reach into Python internals.
 
 ## OCR decision logic — full detail
 
@@ -518,7 +518,7 @@ For encrypted PDFs (`pikepdf` raises): emit `unprocessable_files`, do not auto-r
 
 ### Re-OCR review (separate from auto)
 
-The scanner emits `ocr_review_candidates` when a file's recorded `ocr.engine_version` or `ocr.languages` differ from the current configured tooling. **This list is never auto-processed.** The user reviews via `automafile review-ocr` or via `/triage`. For each candidate the user picks:
+The scanner emits `ocr_review_candidates` when a file's recorded `ocr.engine_version` or `ocr.languages` differ from the current configured tooling. **This list is never auto-processed.** The user reviews via `dnd review-ocr` or via `/triage`. For each candidate the user picks:
 
 - `Yes, redo OCR` → run OCR with current config; update metadata; bump `metadata_modified`.
 - `No, leave it` → only bump `metadata_modified` so the file isn't surfaced on the next scan.
@@ -550,16 +550,16 @@ Foreground watcher prints to console. When `windows-toasts` is installed, also p
 
 The implementing agent must demonstrate each of these end to end before declaring done:
 
-1. **Bootstrap** — fresh clone, `.\scripts\install.ps1` runs cleanly, venv created, deps installed, Tesseract + Ollama verified, memory templates seeded, `Inbox` and `Automafile` dirs exist.
+1. **Bootstrap** — fresh clone, `.\scripts\install.ps1` runs cleanly, venv created, deps installed, Tesseract + Ollama verified, memory templates seeded, `Inbox` and `DragnDoc` dirs exist.
 2. **Watcher happy path** — drop a Hebrew PDF with a text layer into `Inbox/`. Watcher fires, no OCR runs, sidecar `<Inbox>/.meta/<name>.pdf.md` is written, log line shows `target=sidecar tier=strict ocr=no_ocr`. The PDF itself is byte-identical to what was dropped (verify with sha256).
 3. **Watcher OCR path** — drop a Hebrew JPEG. Watcher runs Tesseract with `heb+eng`, sidecar contains the recovered text in `# Summary` and `ocr.engine=tesseract`. Verify the JPEG is byte-identical.
 4. **Sidecar path** — drop a `.txt` file with Hebrew content. Watcher writes `<file_dir>/.meta/<name>.txt.md` with frontmatter + body. Verify the `.meta/` folder has `+h` attribute (`attrib +h .meta`).
 5. **No source-file mutation** — record `Get-FileHash <pdf>` before drop; after watcher fires, the hash is unchanged.
 6. **LLM tier fallback** — synthetically inject malformed JSON via a stub Ollama responder (or by setting model temperature to 1.0) and verify `tier=repair` or `tier=retry` is logged, never `tier=placeholder` for content-bearing files.
-7. **Scanner** — `automafile scan` walks the tree and produces a worklist with the right shape. Manually delete a sidecar's referenced file; the next `scan` reports it as `orphan_sidecars` with hash matches if applicable.
-8. **Re-OCR review surfaces** — change `TESSERACT_LANGS` from `heb+eng` to `heb`; next `scan` lists previously-OCR'd files in `ocr_review_candidates`, **not** in `files_needing_ocr`. Run `automafile review-ocr`, decline; verify `metadata_modified` bumped and the file no longer surfaces on subsequent scans.
+7. **Scanner** — `dnd scan` walks the tree and produces a worklist with the right shape. Manually delete a sidecar's referenced file; the next `scan` reports it as `orphan_sidecars` with hash matches if applicable.
+8. **Re-OCR review surfaces** — change `TESSERACT_LANGS` from `heb+eng` to `heb`; next `scan` lists previously-OCR'd files in `ocr_review_candidates`, **not** in `files_needing_ocr`. Run `dnd review-ocr`, decline; verify `metadata_modified` bumped and the file no longer surfaces on subsequent scans.
 9. **/triage end-to-end** — drop 3 docs, run `/triage` in Claude Code from the repo root. Two get auto-applied, one prompts. Files end up at `<MANAGED_DIR>/<Category>/<smart-name>.<ext>`. Sidecars (where applicable) follow into `.meta/`.
-10. **Filesystem ownership check** — rename a filed file in Explorer. Run `automafile scan`; the file appears in `files_with_partial_metadata` (path mismatch) or `orphan_sidecars`. Run `automafile reconcile`; hash-based relink is proposed.
+10. **Filesystem ownership check** — rename a filed file in Explorer. Run `dnd scan`; the file appears in `files_with_partial_metadata` (path mismatch) or `orphan_sidecars`. Run `dnd reconcile`; hash-based relink is proposed.
 11. **OneDrive integrity** — verify a filed file syncs cleanly: change one line in its filename, watch OneDrive update; metadata in the file body stays intact (it survived the rename).
 
 ## Things explicitly *not* in scope
@@ -575,12 +575,12 @@ The implementing agent must demonstrate each of these end to end before declarin
 
 ## Cross-references — copy from the previous repo verbatim, then adapt
 
-These artifacts in `d:\automafile\` translate cleanly and should be the starting points (don't reinvent):
+These artifacts in `d:\dragndoc\` translate cleanly and should be the starting points (don't reinvent):
 
-- **The LLM prompt** — `d:\automafile\config\router-second-pass-prompt.txt`. Copy to `automafile/prompts/triage.txt`. Trim Paperless-specific phrasing; keep the per-field rules (especially the summary length and Hebrew-friendly clauses).
-- **Memory file shapes** — `d:\automafile\memory\preferences.md`, `taxonomy.md`, `pointer.md`. Copy and adapt to drop Paperless terminology (`paperless_after_filing` → `keep_inbox_copy`, etc.).
-- **/triage SKILL.md** — `d:\automafile\.claude\skills\triage\SKILL.md`. Copy. Replace Paperless API calls with `automafile` CLI invocations and filesystem reads. Keep the structure (drift check, queue build, decide, gates, file, learn).
-- **The tier-parser fallback shape** — `d:\automafile\scripts\sync-paperless-documents.ps1`'s `Invoke-OllamaDecision` and helpers. Port the algorithm to Python (it's ~100 lines of straightforward porting; the regex patterns and tier names map 1:1).
+- **The LLM prompt** — `d:\dragndoc\config\router-second-pass-prompt.txt`. Copy to `dragndoc/prompts/triage.txt`. Trim Paperless-specific phrasing; keep the per-field rules (especially the summary length and Hebrew-friendly clauses).
+- **Memory file shapes** — `d:\dragndoc\memory\preferences.md`, `taxonomy.md`, `pointer.md`. Copy and adapt to drop Paperless terminology (`paperless_after_filing` → `keep_inbox_copy`, etc.).
+- **/triage SKILL.md** — `d:\dragndoc\.claude\skills\triage\SKILL.md`. Copy. Replace Paperless API calls with `dragndoc` CLI invocations and filesystem reads. Keep the structure (drift check, queue build, decide, gates, file, learn).
+- **The tier-parser fallback shape** — `d:\dragndoc\scripts\sync-paperless-documents.ps1`'s `Invoke-OllamaDecision` and helpers. Port the algorithm to Python (it's ~100 lines of straightforward porting; the regex patterns and tier names map 1:1).
 - **The Hebrew-adjacency quote sanitizer** — same file, `Sanitize-ExcerptForJsonModel`. Port directly.
 - **The `medical/health → personal` category alias** in `ConvertTo-CategoryKey`. Same script. Port the whole alias map.
 
@@ -590,8 +590,8 @@ After copying these, do not import or run any other code from the old repo. The 
 
 Build in this order so you have a working pipeline at every checkpoint:
 
-1. **Bootstrap + skeleton** — pyproject, venv, `automafile bootstrap`, empty CLI commands wired up, memory templates seeded.
-2. **Extractors + dispatcher** — happy-path text extraction for PDF, DOCX, TXT, JPEG (no OCR yet, no LLM yet). Verify with `automafile process` on fixtures.
+1. **Bootstrap + skeleton** — pyproject, venv, `dnd bootstrap`, empty CLI commands wired up, memory templates seeded.
+2. **Extractors + dispatcher** — happy-path text extraction for PDF, DOCX, TXT, JPEG (no OCR yet, no LLM yet). Verify with `dnd process` on fixtures.
 3. **OCR module** — text-layer detection, Tesseract integration, image and PDF OCR. Verify on fixtures.
 4. **LLM client** — Ollama call + tier parser. Test offline against canned malformed JSON.
 5. **Native metadata writers** — start with PDF and JPEG (highest value); add Office formats; mtime preservation throughout.
@@ -601,7 +601,7 @@ Build in this order so you have a working pipeline at every checkpoint:
 9. **Reconcile** — orphan detection, hash matching, interactive CLI.
 10. **Re-OCR review** — surface candidates, interactive resolve.
 11. **Filer** — file-move + sidecar move + metadata update.
-12. **/triage skill** — port from old repo; wire to `automafile` CLI.
+12. **/triage skill** — port from old repo; wire to `dragndoc` CLI.
 13. **Tests** — pytest covering each extractor, the dispatcher, the OCR decision matrix, the LLM tier fallback, the reconcile hash logic, the mtime restoration.
 14. **Documentation** — README quickstart, `docs/architecture.md` with the data-flow diagram.
 

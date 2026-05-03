@@ -1,9 +1,9 @@
 {
-  "name": "automafile",
+  "name": "dragndoc",
   "dockerComposeFile": ["../compose.yml", "docker-compose.dev.yml"],
-  "service": "automafile",
+  "service": "dragndoc",
   "workspaceFolder": "/workspace",
-  "remoteUser": "automafile",
+  "remoteUser": "dragndoc",
   "customizations": {
     "vscode": {
       "settings": {

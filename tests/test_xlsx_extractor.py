@@ -7,7 +7,7 @@ import pytest
 
 def test_xlsx_sheets_become_sections(tmp_path):
     openpyxl = pytest.importorskip("openpyxl")
-    from automafile.extractors import xlsx as xlsx_ext
+    from dragndoc.extractors import xlsx as xlsx_ext
 
     path = tmp_path / "book.xlsx"
     wb = openpyxl.Workbook()

@@ -24,7 +24,7 @@
     "W5M0MpCehiHzreSzNTczkc9d"
   ],
   "words": [
-    "automafile",
+    "dragndoc",
     "Gotenberg",
     "NSSM",
     "NTFS",
@@ -106,7 +106,7 @@
   ],
   "overrides": [
     {
-      "filename": "automafile/metadata/native.py",
+      "filename": "dragndoc/metadata/native.py",
       "words": ["Cehi", "Hzre", "Tczkc"]
     },
     {

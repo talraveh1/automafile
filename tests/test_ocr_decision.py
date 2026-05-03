@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.ocr import OcrDecision, pdf_ocr_decision
-from automafile.config import get_settings
+from dragndoc.ocr import OcrDecision, pdf_ocr_decision
+from dragndoc.config import get_settings
 
 
 def _make_pdf(path: Path, page_texts: list[str]) -> None:
@@ -107,7 +107,7 @@ def test_skip_encrypted(tmp_path):
 
 
 def test_coalesce_page_ranges():
-    from automafile.ocr import _coalesce_page_ranges
+    from dragndoc.ocr import _coalesce_page_ranges
     # zero-based input → one-based (first, last) pairs
     assert _coalesce_page_ranges([]) == []
     assert _coalesce_page_ranges([0]) == [(1, 1)]

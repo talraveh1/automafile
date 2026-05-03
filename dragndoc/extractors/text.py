@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.config import get_settings
-from automafile.extractors._caps import CapConfig, trim_to_word_boundary
-from automafile.extractors._text_quality import raise_if_garbled
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
+from dragndoc.config import get_settings
+from dragndoc.extractors._caps import CapConfig, trim_to_word_boundary
+from dragndoc.extractors._text_quality import raise_if_garbled
+from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 def extract(path: Path, *, strict: bool = False) -> ExtractedDoc:

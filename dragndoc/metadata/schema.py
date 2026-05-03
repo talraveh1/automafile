@@ -46,7 +46,7 @@ class MetadataDoc(BaseModel):
     review: bool = True
     ocr: OcrBlock = Field(default_factory=OcrBlock)
     metadata_modified: str = Field(default_factory=utc_now_iso)
-    metadata_modified_by: str = "automafile-watcher 0.1.0"
+    metadata_modified_by: str = "dragndoc-watcher 0.1.0"
     filed_at: str | None = None
     filed_path: str | None = None
     summary: str = ""

@@ -18,7 +18,7 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("INBOX_DIR", "Inbox")
     monkeypatch.setenv("LOG_LEVEL", "WARNING")
     monkeypatch.setenv("STORAGE_DIR", str(tmp_path / "storage"))
-    from automafile.config import reset_settings
+    from dragndoc.config import reset_settings
     reset_settings()
     yield docs_root
     reset_settings()

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.extractors.base import CorruptDocumentError
+from dragndoc.extractors.base import CorruptDocumentError
 
 
 _BINARY_SIGNATURES = (

@@ -6,7 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
-from automafile.config import get_settings
+from dragndoc.config import get_settings
 
 
 _configured = False
@@ -29,7 +29,7 @@ def setup_logging(level: str | None = None) -> None:
     handlers: list[logging.Handler] = [handler_console]
     try:
         handler_file = logging.FileHandler(
-            settings.logs_dir / "automafile.log",
+            settings.logs_dir / "dragndoc.log",
             encoding="utf-8",
         )
         handler_file.setFormatter(handler_console.formatter)
@@ -51,4 +51,4 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def log_path() -> Path:
-    return get_settings().logs_dir / "automafile.log"
+    return get_settings().logs_dir / "dragndoc.log"

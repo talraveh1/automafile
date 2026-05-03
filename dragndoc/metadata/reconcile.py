@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from automafile.config import get_settings
-from automafile.log import get_logger
-from automafile.metadata.hashing import hash_file
-from automafile.metadata.sidecar import sidecar_path_for, read as sidecar_read
+from dragndoc.config import get_settings
+from dragndoc.log import get_logger
+from dragndoc.metadata.hashing import hash_file
+from dragndoc.metadata.sidecar import sidecar_path_for, read as sidecar_read
 
 
 log = get_logger(__name__)

@@ -9,7 +9,7 @@ The full CLI surface and quickstart commands live in `README.md`. Read those fir
 ```powershell
 .\.venv\Scripts\python.exe -m pytest                 # all tests (fast, ~2-3s)
 .\.venv\Scripts\python.exe -m pytest -x              # stop at first failure
-.\.venv\Scripts\python.exe -m pytest --cov=automafile --cov-report=term-missing
+.\.venv\Scripts\python.exe -m pytest --cov=dragndoc --cov-report=term-missing
 ```
 
 `build/pytest_cache/` and `build/.coverage` collect under `build/`; both are gitignored.
@@ -31,16 +31,16 @@ None configured. If you add one, declare it in `pyproject.toml` and document it 
 ### After completing a code change
 
 1. Run `python -m pytest` — must be green.
-2. If you touched `config.py`, `ocr.py`, or `llm.py`: run `python -m automafile doctor`.
-3. If you touched extractors or metadata writers: drop a representative file into a temp inbox (set `DOCUMENTS_ROOT` env var or edit `config.jsonc`) and run `python -m automafile process <path>` end-to-end.
+2. If you touched `config.py`, `ocr.py`, or `llm.py`: run `python -m dragndoc doctor`.
+3. If you touched extractors or metadata writers: drop a representative file into a temp inbox (set `DOCUMENTS_ROOT` env var or edit `config.jsonc`) and run `python -m dragndoc process <path>` end-to-end.
 
 ### Container commands
 
 ```powershell
 docker compose up -d --build           # build image + start watcher
 docker compose logs -f                 # follow logs
-docker compose exec automafile bash    # interactive shell inside the container
-docker compose run --rm automafile python -m automafile doctor   # one-shot
+docker compose exec dragndoc bash    # interactive shell inside the container
+docker compose run --rm dragndoc python -m dragndoc doctor   # one-shot
 docker compose down                    # stop
 docker compose down -v && docker compose up -d --build   # factory reset
 ```

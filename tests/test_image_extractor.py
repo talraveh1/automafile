@@ -8,7 +8,7 @@ import pytest
 def test_multi_page_tiff_ocr_is_capped(tmp_path, monkeypatch):
     pytest.importorskip("PIL")
     from PIL import Image
-    from automafile.extractors import image as image_ext
+    from dragndoc.extractors import image as image_ext
 
     path = tmp_path / "scan.tiff"
     frames = [Image.new("RGB", (8, 8), color=(i, i, i)) for i in range(7)]

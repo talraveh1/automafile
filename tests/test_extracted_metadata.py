@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from automafile.extractors._meta import clean_value, collect
+from dragndoc.extractors._meta import clean_value, collect
 
 
 # ---- helpers ----------------------------------------------------------
@@ -53,7 +53,7 @@ def test_collect_skips_known_binary_keys():
 
 
 def test_html_extractor_collects_title_and_meta(tmp_path):
-    from automafile.extractors import html as html_ext
+    from dragndoc.extractors import html as html_ext
     p = tmp_path / "page.html"
     p.write_text(
         '<html lang="en"><head>'
@@ -76,7 +76,7 @@ def test_html_extractor_collects_title_and_meta(tmp_path):
 def test_pdf_extractor_surfaces_docinfo(tmp_path):
     """DocInfo-only path: no XMP touch, so pikepdf doesn't sync-and-strip."""
     pikepdf = pytest.importorskip("pikepdf")
-    from automafile.extractors import pdf as pdf_ext
+    from dragndoc.extractors import pdf as pdf_ext
     p = tmp_path / "doc.pdf"
     pdf = pikepdf.new()
     pdf.add_blank_page(page_size=(612, 792))
@@ -97,7 +97,7 @@ def test_pdf_extractor_surfaces_docinfo(tmp_path):
 def test_pdf_extractor_surfaces_xmp(tmp_path):
     """XMP-only path: opening the metadata block writes XMP and re-derives DocInfo."""
     pikepdf = pytest.importorskip("pikepdf")
-    from automafile.extractors import pdf as pdf_ext
+    from dragndoc.extractors import pdf as pdf_ext
     p = tmp_path / "doc.pdf"
     pdf = pikepdf.new()
     pdf.add_blank_page(page_size=(612, 792))
@@ -117,7 +117,7 @@ def test_pdf_extractor_surfaces_xmp(tmp_path):
 
 def test_docx_extractor_surfaces_core_properties(tmp_path):
     docx_lib = pytest.importorskip("docx")
-    from automafile.extractors import docx as docx_ext
+    from dragndoc.extractors import docx as docx_ext
     p = tmp_path / "doc.docx"
     d = docx_lib.Document()
     d.core_properties.title = "Project Brief"
@@ -142,7 +142,7 @@ def test_docx_extractor_surfaces_core_properties(tmp_path):
 def test_xlsx_extractor_surfaces_core_and_custom_props(tmp_path):
     openpyxl = pytest.importorskip("openpyxl")
     from openpyxl.packaging.custom import StringProperty
-    from automafile.extractors import xlsx as xlsx_ext
+    from dragndoc.extractors import xlsx as xlsx_ext
     p = tmp_path / "book.xlsx"
     wb = openpyxl.Workbook()
     wb.active["A1"] = "data"
@@ -165,7 +165,7 @@ def test_xlsx_extractor_surfaces_core_and_custom_props(tmp_path):
 
 def test_pptx_extractor_surfaces_core_properties(tmp_path):
     pptx_lib = pytest.importorskip("pptx")
-    from automafile.extractors import pptx as pptx_ext
+    from dragndoc.extractors import pptx as pptx_ext
     p = tmp_path / "deck.pptx"
     pres = pptx_lib.Presentation()
     pres.core_properties.title = "Kickoff Deck"
@@ -183,7 +183,7 @@ def test_pptx_extractor_surfaces_core_properties(tmp_path):
 def test_image_extractor_surfaces_exif_and_dimensions(tmp_path):
     PIL = pytest.importorskip("PIL")
     from PIL import Image
-    from automafile.extractors import image as image_ext
+    from dragndoc.extractors import image as image_ext
 
     p = tmp_path / "shot.jpg"
     im = Image.new("RGB", (320, 240), color=(128, 0, 128))
@@ -207,7 +207,7 @@ def test_image_extractor_surfaces_exif_and_dimensions(tmp_path):
 
 
 def test_text_extractor_has_empty_extracted_metadata(tmp_path):
-    from automafile.extractors import text as text_ext
+    from dragndoc.extractors import text as text_ext
     p = tmp_path / "note.txt"
     p.write_text("hello", encoding="utf-8")
     doc = text_ext.extract(p)
@@ -218,8 +218,8 @@ def test_text_extractor_has_empty_extracted_metadata(tmp_path):
 
 
 def test_hints_for_merges_extracted_metadata(tmp_path):
-    from automafile.extractors.base import ExtractedDoc, Section
-    from automafile.pipeline import _hints_for
+    from dragndoc.extractors.base import ExtractedDoc, Section
+    from dragndoc.pipeline import _hints_for
 
     p = tmp_path / "x.pdf"
     p.write_bytes(b"%PDF-1.4\n")

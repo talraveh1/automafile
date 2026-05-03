@@ -1,12 +1,12 @@
-# Compose configuration for Automafile.
+# Compose configuration for Drag'n'Doc.
 # Copy this file to compose.yml and edit the documents bind-mount path.
 # Works under Docker Desktop, Podman Desktop, or any Compose-compatible runtime.
 
 services:
-  automafile:
+  dragndoc:
     build: .
-    image: automafile:latest
-    container_name: automafile
+    image: dragndoc:latest
+    container_name: dragndoc
     restart: unless-stopped
 
     environment:
@@ -23,7 +23,7 @@ services:
 
       # host git identity (read-only) — REPLACE with your gitconfig path
       # (drop this line if you don't want git inside the container to know who you are)
-      - "C:/Users/<you>/.gitconfig:/home/automafile/.gitconfig:ro"
+      - "C:/Users/<you>/.gitconfig:/home/dragndoc/.gitconfig:ro"
 
     # makes Ollama on the host reachable from inside the container.
     # required on native-Linux Docker; redundant (no-op) on Docker Desktop and
@@ -32,4 +32,4 @@ services:
       - "host.docker.internal:host-gateway"
 
     working_dir: /workspace
-    command: ["python", "-m", "automafile", "watch"]
+    command: ["python", "-m", "dragndoc", "watch"]

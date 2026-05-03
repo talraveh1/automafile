@@ -1,4 +1,4 @@
-"""Typer-based CLI for Automafile."""
+"""Typer-based CLI for Drag'n'Doc."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from typing import Annotated, Optional
 
 import typer
 
-from automafile import __version__
-from automafile.log import get_logger
+from dragndoc import __version__
+from dragndoc.log import get_logger
 
 
 log = get_logger(__name__)
@@ -21,14 +21,14 @@ log = get_logger(__name__)
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
-    help="Automafile — watch a folder, enrich files with metadata, file them via Claude.",
+    help="Drag'n'Doc — watch a folder, enrich files with metadata, file them via Claude.",
 )
 
 
 @app.callback()
 def _root(version: Annotated[bool, typer.Option("--version", help="Print version and exit.")] = False) -> None:
     if version:
-        typer.echo(f"automafile {__version__}")
+        typer.echo(f"dragndoc {__version__}")
         raise typer.Exit(0)
 
 
@@ -40,10 +40,10 @@ def watch(
     if documents_root is not None:
         import os
         os.environ["DOCUMENTS_ROOT"] = str(documents_root.resolve())
-        from automafile.config import reset_settings
+        from dragndoc.config import reset_settings
         reset_settings()
     log.info("CLI: watch (documents_root=%s)", documents_root)
-    from automafile.watcher import run_watcher
+    from dragndoc.watcher import run_watcher
     run_watcher()
 
 
@@ -56,8 +56,8 @@ def process(
     stop_on_error: Annotated[bool, typer.Option("--stop-on-error", help="Worklist mode only: stop at the first failure.")] = False,
 ) -> None:
     """Process a worklist (default) or a single file."""
-    from automafile.config import get_settings
-    from automafile.pipeline import format_result_line, process_file
+    from dragndoc.config import get_settings
+    from dragndoc.pipeline import format_result_line, process_file
 
     settings = get_settings()
     if path is None or _looks_like_worklist(path, settings.scan_dir):
@@ -86,7 +86,7 @@ def ocr(
 ) -> None:
     """Force OCR on a single file and print the recovered text."""
     log.info("CLI: ocr %s (langs=%s)", path, langs)
-    from automafile.ocr import run_ocr
+    from dragndoc.ocr import run_ocr
     text = run_ocr(path, langs=langs)
     typer.echo(text)
 
@@ -101,10 +101,10 @@ def scan(
     if documents_root is not None:
         import os
         os.environ["DOCUMENTS_ROOT"] = str(documents_root.resolve())
-        from automafile.config import reset_settings
+        from dragndoc.config import reset_settings
         reset_settings()
     log.info("CLI: scan (path=%s, json=%s)", path, print_json)
-    from automafile.scanner import run_scan, write_worklist
+    from dragndoc.scanner import run_scan, write_worklist
     wl = run_scan(subpath=path)
     if print_json:
         typer.echo(json.dumps(wl.to_dict(), indent=2, ensure_ascii=False))
@@ -112,7 +112,7 @@ def scan(
     out = write_worklist(wl)
     if out is None:
         typer.echo(f"scan complete: seen={wl.files_seen}; everything is already in an existing worklist.")
-        typer.echo("next: automafile process")
+        typer.echo("next: dnd process")
         return
     typer.echo(
         f"scan complete: seen={wl.files_seen} need_ocr={len(wl.files_needing_ocr)} "
@@ -122,7 +122,7 @@ def scan(
         f"unprocessable={len(wl.unprocessable_files)} (counts reflect new entries only)"
     )
     typer.echo(f"worklist: {out}")
-    typer.echo(f"next: automafile process")
+    typer.echo(f"next: dnd process")
 
 
 _WORKLIST_BUCKETS = (
@@ -206,7 +206,7 @@ def _process_worklist(
     force: bool,
     stop_on_error: bool,
 ) -> None:
-    from automafile.pipeline import format_result_line, process_file
+    from dragndoc.pipeline import format_result_line, process_file
 
     log.info(
         "CLI: process worklist (worklist=%s dry_run=%s force_ocr=%s force=%s)",
@@ -344,11 +344,11 @@ def review_ocr(
     yes_all: Annotated[bool, typer.Option("--yes-all", help="Re-OCR every candidate without asking.")] = False,
 ) -> None:
     """Walk OCR review candidates and act on each."""
-    from automafile.config import get_settings
-    from automafile.metadata.sidecar import read as sidecar_read, write as sidecar_write
-    from automafile.metadata.schema import utc_now_iso
-    from automafile.ocr import run_ocr, tesseract_version
-    from automafile.scanner import run_scan
+    from dragndoc.config import get_settings
+    from dragndoc.metadata.sidecar import read as sidecar_read, write as sidecar_write
+    from dragndoc.metadata.schema import utc_now_iso
+    from dragndoc.ocr import run_ocr, tesseract_version
+    from dragndoc.scanner import run_scan
 
     log.info("CLI: review-ocr (yes_all=%s)", yes_all)
     settings = get_settings()
@@ -394,7 +394,7 @@ def inspect(
     recursive: Annotated[bool, typer.Option("--recursive/--no-recursive", help="Walk directories recursively.")] = True,
 ) -> None:
     """Dump sidecar metadata for one or many files as JSON. Read-only — no extraction, no LLM, no writes."""
-    from automafile.config import get_settings
+    from dragndoc.config import get_settings
 
     settings = get_settings()
     target = path if path is not None else settings.inbox_path
@@ -428,7 +428,7 @@ def _collect_inspect_paths(start: Path, recursive: bool) -> list[Path]:
 
 
 def _inspect_one(file_path: Path, documents_root: Path) -> dict:
-    from automafile.metadata.sidecar import read as sidecar_read
+    from dragndoc.metadata.sidecar import read as sidecar_read
 
     try:
         rel = str(file_path.relative_to(documents_root)).replace("\\", "/")
@@ -466,7 +466,7 @@ def mv(
 ) -> None:
     """Move a file together with its sidecar. Fails if target file or target sidecar exists, unless ``-f``."""
     import shutil
-    from automafile.metadata.sidecar import sidecar_path_for, update_relative_path
+    from dragndoc.metadata.sidecar import sidecar_path_for, update_relative_path
 
     if not src.exists():
         typer.echo(f"src not found: {src}", err=True)
@@ -498,14 +498,125 @@ def mv(
     typer.echo(f"moved: {target}")
 
 
+
+@app.command()
+def cp(
+    src: Annotated[Path, typer.Argument(help="Source file path.")],
+    dst: Annotated[Path, typer.Argument(help="Destination file path or directory.")],
+    force: Annotated[bool, typer.Option("-f", "--force", help="Overwrite target file and target sidecar if they exist.")] = False,
+) -> None:
+    """Copy a file together with its sidecar. Fails if target file or target sidecar exists, unless ``-f``."""
+    import shutil
+    from dragndoc.metadata.sidecar import copy_to, sidecar_path_for
+
+    if not src.exists():
+        typer.echo(f"src not found: {src}", err=True)
+        raise typer.Exit(1)
+    if not src.is_file():
+        typer.echo(f"src is not a file: {src}", err=True)
+        raise typer.Exit(1)
+
+    target = dst / src.name if dst.exists() and dst.is_dir() else dst
+    if target.resolve() == src.resolve():
+        typer.echo(f"src and dst are the same: {src}", err=True)
+        raise typer.Exit(1)
+
+    src_sidecar = sidecar_path_for(src)
+    target_sidecar = sidecar_path_for(target)
+
+    if target.exists() and not force:
+        typer.echo(f"target exists: {target} (use -f to overwrite)", err=True)
+        raise typer.Exit(1)
+    if target_sidecar.exists() and not force:
+        typer.echo(f"target sidecar exists: {target_sidecar} (use -f to overwrite)", err=True)
+        raise typer.Exit(1)
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    log.info("CLI: cp %s -> %s (force=%s)", src, target, force)
+    shutil.copy2(str(src), str(target))
+    if src_sidecar.exists():
+        copy_to(src, target)
+    typer.echo(f"copied: {target}")
+
+
+@app.command()
+def rm(
+    path: Annotated[Path, typer.Argument(help="File path to remove.")],
+    force: Annotated[bool, typer.Option("-f", "--force", help="Ignore missing file and exit successfully.")] = False,
+) -> None:
+    """Remove a file together with its sidecar. Fails if the file is missing, unless ``-f``."""
+    from dragndoc.metadata.sidecar import sidecar_path_for
+
+    if not path.exists():
+        if force:
+            return
+        typer.echo(f"not found: {path}", err=True)
+        raise typer.Exit(1)
+    if not path.is_file():
+        typer.echo(f"not a file: {path}", err=True)
+        raise typer.Exit(1)
+
+    sc = sidecar_path_for(path)
+    log.info("CLI: rm %s (force=%s)", path, force)
+    path.unlink()
+    if sc.exists():
+        sc.unlink()
+    typer.echo(f"removed: {path}")
+
+
+
+@app.command()
+def ls(
+    path: Annotated[Path, typer.Argument(help="Directory to list.")] = Path("."),
+    show_all: Annotated[bool, typer.Option("-a", "--all", help="Show entries that start with a dot.")] = False,
+) -> None:
+    """List a directory; files that have a sidecar are marked with ``*``."""
+    from dragndoc.config import get_settings
+    from dragndoc.metadata.sidecar import sidecar_path_for
+
+    if not path.exists():
+        typer.echo(f"not found: {path}", err=True)
+        raise typer.Exit(1)
+    if not path.is_dir():
+        typer.echo(f"not a directory: {path}", err=True)
+        raise typer.Exit(1)
+
+    meta_subfolder = get_settings().meta_subfolder
+    entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+    for entry in entries:
+        if entry.name == meta_subfolder:
+            continue
+        if not show_all and entry.name.startswith("."):
+            continue
+        if entry.is_dir():
+            typer.echo(f"  {entry.name}/")
+        else:
+            mark = "*" if sidecar_path_for(entry).exists() else " "
+            typer.echo(f"{mark} {entry.name}")
+
+
+@app.command()
+def cat(
+    path: Annotated[Path, typer.Argument(help="File whose sidecar metadata should be printed.")],
+) -> None:
+    """Print the sidecar metadata associated with ``path``."""
+    from dragndoc.metadata.sidecar import sidecar_path_for
+
+    sc = sidecar_path_for(path)
+    if not sc.exists():
+        typer.echo(f"no sidecar for: {path}", err=True)
+        raise typer.Exit(1)
+    typer.echo(sc.read_text(encoding="utf-8"), nl=False)
+
+
 @app.command()
 def reconcile(
     yes_all: Annotated[bool, typer.Option("--yes-all", help="Auto-accept hash-matched relinks when there is a single match.")] = False,
 ) -> None:
     """Walk orphan sidecars and propose hash-matched relinks."""
-    from automafile.config import get_settings
-    from automafile.metadata.reconcile import find_orphans
-    from automafile.metadata.sidecar import update_relative_path, sidecar_path_for
+    from dragndoc.config import get_settings
+    from dragndoc.metadata.reconcile import find_orphans
+    from dragndoc.metadata.sidecar import update_relative_path, sidecar_path_for
 
     log.info("CLI: reconcile (yes_all=%s)", yes_all)
     settings = get_settings()
@@ -547,7 +658,7 @@ def bootstrap(
 ) -> None:
     """Seed memory templates and create folder layout. Idempotent."""
     log.info("CLI: bootstrap (force=%s)", force)
-    from automafile.bootstrap import bootstrap as bootstrap_fn
+    from dragndoc.bootstrap import bootstrap as bootstrap_fn
     bootstrap_fn(force=force)
 
 
@@ -555,9 +666,9 @@ def bootstrap(
 def doctor() -> None:
     """Diagnose the local environment (Tesseract, Ollama, paths)."""
     log.info("CLI: doctor")
-    from automafile.config import get_settings
-    from automafile.llm import ollama_available, ollama_has_model
-    from automafile.ocr import tesseract_available, tesseract_languages, tesseract_version
+    from dragndoc.config import get_settings
+    from dragndoc.llm import ollama_available, ollama_has_model
+    from dragndoc.ocr import tesseract_available, tesseract_languages, tesseract_version
 
     settings = get_settings()
     typer.echo(f"Documents root: {settings.documents_root}{'  (exists)' if settings.documents_root.exists() else '  (missing)'}")
@@ -581,7 +692,7 @@ def toaster(
 ) -> None:
     """Tail the events journal and fire Windows toasts. Run on the host."""
     log.info("CLI: toaster (no_tray=%s)", no_tray)
-    from automafile.toaster import run_toaster
+    from dragndoc.toaster import run_toaster
     run_toaster(tray=not no_tray)
 
 
@@ -595,8 +706,8 @@ def filer_apply_cmd(
 ) -> None:
     r"""Move ``path`` into the managed tree under ``category\[/subcategory]/<name>``."""
     log.info("CLI: filer-apply %s (category=%s subcategory=%s overwrite=%s)", path, category, subcategory, overwrite)
-    from automafile.filer import FilingProposal, apply_filing, smart_filename
-    from automafile.metadata.sidecar import read as sidecar_read
+    from dragndoc.filer import FilingProposal, apply_filing, smart_filename
+    from dragndoc.metadata.sidecar import read as sidecar_read
 
     if name is None:
         doc, summary, _ = sidecar_read(path)

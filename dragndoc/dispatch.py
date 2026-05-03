@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.extractors import (
+from dragndoc.extractors import (
     docx as docx_ext,
     epub as epub_ext,
     html as html_ext,
@@ -15,8 +15,8 @@ from automafile.extractors import (
     unknown as unknown_ext,
     xlsx as xlsx_ext,
 )
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, ExtractorError
-from automafile.log import get_logger
+from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, ExtractorError
+from dragndoc.log import get_logger
 
 
 log = get_logger(__name__)

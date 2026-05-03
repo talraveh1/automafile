@@ -1,21 +1,21 @@
 # Override applied by VS Code Dev Containers on top of ../compose.yml.
 # Copy this file to docker-compose.dev.yml and edit the host paths below.
 # Swaps PID 1 to a no-op so VS Code can attach. Run the app yourself from
-# a VS Code terminal, e.g. `automafile watch`.
+# a VS Code terminal, e.g. `dnd watch`.
 
 services:
-  automafile:
+  dragndoc:
     command: ["sleep", "infinity"]
     restart: "no"
     volumes:
       # AI tool configs — REPLACE the host paths with yours
-      - "C:/Users/<you>/.claude:/home/automafile/.claude"
-      - "C:/Users/<you>/.claude.json:/home/automafile/.claude.json"
-      - "C:/Users/<you>/.codex:/home/automafile/.codex"
-      - "C:/Users/<you>/.gemini:/home/automafile/.gemini"
-      - "C:/Users/<you>/.copilot:/home/automafile/.copilot"
+      - "C:/Users/<you>/.claude:/home/dragndoc/.claude"
+      - "C:/Users/<you>/.claude.json:/home/dragndoc/.claude.json"
+      - "C:/Users/<you>/.codex:/home/dragndoc/.codex"
+      - "C:/Users/<you>/.gemini:/home/dragndoc/.gemini"
+      - "C:/Users/<you>/.copilot:/home/dragndoc/.copilot"
       # persist VS Code Server across container recreations so reattach is fast
-      - vscode-server:/home/automafile/.vscode-server
+      - vscode-server:/home/dragndoc/.vscode-server
 
 volumes:
   vscode-server:

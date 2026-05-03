@@ -1,4 +1,4 @@
-# Automafile
+# Drag'n'Doc
 
 A thin Python pipeline that watches a folder, extracts text + metadata from
 each file (using OCR only when needed), asks a local Ollama LLM for tags +
@@ -9,7 +9,7 @@ a hidden `.meta/` subfolder otherwise. A separate Claude Code skill named
 
 ## Quickstart
 
-There are two ways to run Automafile: **native** (a venv on the host) or
+There are two ways to run Drag'n'Doc: **native** (a venv on the host) or
 **containerized** (Docker / Podman). Native is simpler; containerized
 sandboxes the agent away from the rest of the host filesystem.
 
@@ -23,10 +23,10 @@ python scripts\install.py
 # pin <documents_root>\<inbox_dir> to "Always keep on this device" in OneDrive
 
 # start the watcher
-.\.venv\Scripts\python.exe -m automafile watch
+.\.venv\Scripts\python.exe -m dragndoc watch
 
 # in a second terminal, start the toaster (renders Windows toasts from the events journal)
-.\.venv\Scripts\python.exe -m automafile toaster
+.\.venv\Scripts\python.exe -m dragndoc toaster
 
 # optional: register the toaster as a Windows scheduled task that auto-starts at logon
 python scripts\toaster.py            # install / refresh
@@ -68,8 +68,8 @@ nothing else from the host is reachable.
 - **Containerized**: a Compose-compatible runtime (Docker Desktop or Podman
   Desktop); Ollama running on the host.
 
-Run `python -m automafile doctor` (native) or `docker compose run --rm
-automafile python -m automafile doctor` (container) after install to verify
+Run `python -m dragndoc doctor` (native) or `docker compose run --rm
+dragndoc python -m dragndoc doctor` (container) after install to verify
 everything is reachable.
 
 > **Git Bash gotcha**: when invoking the container CLI from MSYS-based
@@ -91,16 +91,16 @@ and the **`documents_root`** you configure. It never reaches outside.
 
 | Command | Purpose |
 | --- | --- |
-| `automafile watch` | Start the watcher in the foreground. |
-| `automafile toaster` | Tail the events journal and fire Windows toasts; hosts a tray icon (right-click → Triage / Log / Exit). `--no-tray` for headless. |
-| `automafile process <path>` | Process a single file once. |
-| `automafile ocr <path>` | Force OCR on a file. |
-| `automafile scan` | Walk the tree and emit a worklist. |
-| `automafile review-ocr` | Walk OCR review candidates interactively. |
-| `automafile reconcile` | Walk orphan sidecars interactively. |
-| `automafile bootstrap` | Seed config + memory + folders. |
-| `automafile doctor` | Diagnose the environment. |
-| `automafile filer-apply` | Move a file into `<documents_root>/<category>/...` (used by `/triage`). |
+| `dnd watch` | Start the watcher in the foreground. |
+| `dnd toaster` | Tail the events journal and fire Windows toasts; hosts a tray icon (right-click → Triage / Log / Exit). `--no-tray` for headless. |
+| `dnd process <path>` | Process a single file once. |
+| `dnd ocr <path>` | Force OCR on a file. |
+| `dnd scan` | Walk the tree and emit a worklist. |
+| `dnd review-ocr` | Walk OCR review candidates interactively. |
+| `dnd reconcile` | Walk orphan sidecars interactively. |
+| `dnd bootstrap` | Seed config + memory + folders. |
+| `dnd doctor` | Diagnose the environment. |
+| `dnd filer-apply` | Move a file into `<documents_root>/<category>/...` (used by `/triage`). |
 
 ## Layout
 
@@ -113,7 +113,7 @@ and the **`documents_root`** you configure. It never reaches outside.
 ├── Dockerfile                       # container build recipe
 ├── .devcontainer/                   # VS Code Dev Containers config
 ├── architecture.md                  # data-flow diagram
-├── automafile/                      # the Python package
+├── dragndoc/                      # the Python package
 ├── tests/                           # pytest
 ├── .claude/skills/triage/SKILL.md   # the Claude /triage skill
 ├── memory/                          # gitignored, project-local /triage memory

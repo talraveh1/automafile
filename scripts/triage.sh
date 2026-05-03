@@ -16,6 +16,6 @@ fi
 
 # else: we're on the host, so spin up the container and exec into it
 cd "$(dirname "$0")/.."
-docker compose up -d automafile >/dev/null
-exec docker compose exec automafile \
+docker compose up -d dragndoc >/dev/null
+exec docker compose exec dragndoc \
     claude --dangerously-skip-permissions "$PROMPT"

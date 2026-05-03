@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.metadata import sidecar
-from automafile.metadata.hashing import hash_file
-from automafile.metadata.schema import MetadataDoc, OcrBlock
-from automafile.scanner import run_scan, write_worklist
+from dragndoc.metadata import sidecar
+from dragndoc.metadata.hashing import hash_file
+from dragndoc.metadata.schema import MetadataDoc, OcrBlock
+from dragndoc.scanner import run_scan, write_worklist
 
 
 def test_run_scan_on_empty_tree(docs_root):
@@ -99,9 +99,9 @@ def test_ocr_review_candidates_when_engine_drifts(docs_root, monkeypatch):
         ),
     )
     sidecar.write(p, meta, summary_body="something")
-    monkeypatch.setattr("automafile.scanner.tesseract_version", lambda: "tesseract 5.5.0")
+    monkeypatch.setattr("dragndoc.scanner.tesseract_version", lambda: "tesseract 5.5.0")
     monkeypatch.setenv("TESSERACT_LANGS", "heb+eng")
-    from automafile.config import reset_settings
+    from dragndoc.config import reset_settings
     reset_settings()
     wl = run_scan()
     rels = [c["relative_path"] for c in wl.ocr_review_candidates]

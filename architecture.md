@@ -70,7 +70,7 @@ flowchart LR
 
 ## Toaster
 
-`automafile toaster` is a separate, long-running consumer of
+`dnd toaster` is a separate, long-running consumer of
 `storage/events.jsonl`. It tails the file with a 1 s poll, persists a
 byte offset to `storage/toaster.cursor` after every fired toast (so
 restarts never miss or duplicate), and renders Windows toasts via the
@@ -89,7 +89,7 @@ shared surface needed.
 
 ## Scanner
 
-`automafile scan` walks the tree, builds a hash index (cached by
+`dnd scan` walks the tree, builds a hash index (cached by
 `(mtime, size)` in `storage/scan/hash-index.json`), and emits a worklist
 JSON to `storage/scan/scan-<ts>.json`. It identifies:
 
@@ -125,7 +125,7 @@ The choice is purely about isolation — the container variant exists so an
 agent (Claude Code or otherwise) running inside it cannot reach files
 outside the bind-mounts.
 
-`automafile.ocr._resolve_tesseract_bin` validates that any configured path
+`dragndoc.ocr._resolve_tesseract_bin` validates that any configured path
 actually exists before honoring it, so the host's `config.jsonc` (with a
 Windows path) does not break the Linux container — the resolver falls
 through to `shutil.which("tesseract")` instead.
@@ -141,6 +141,6 @@ writes back. All extracted/enriched metadata lives in
 - Sidecars sync with the documents through OneDrive (the `.meta/` folder
   rides along).
 - Moves must always travel the file *and* its sidecar. Use
-  `python -m automafile mv <src> <dst>` (or `filer-apply` for the
+  `python -m dragndoc mv <src> <dst>` (or `filer-apply` for the
   category-based path) — never raw `mv` / `move`.
 ```

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from automafile.config import get_settings
-from automafile.extractors._caps import CapConfig, select_pages
-from automafile.extractors._meta import collect
-from automafile.extractors.base import CorruptDocumentError, ExtractedDoc, Section
+from dragndoc.config import get_settings
+from dragndoc.extractors._caps import CapConfig, select_pages
+from dragndoc.extractors._meta import collect
+from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # python-pptx CoreProperties attributes — same OOXML core schema as docx.

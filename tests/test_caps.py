@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from automafile.extractors._caps import CapConfig, select_pages, trim_to_word_boundary
+from dragndoc.extractors._caps import CapConfig, select_pages, trim_to_word_boundary
 
 
 def test_min_pages_floor_even_when_target_hit_early():

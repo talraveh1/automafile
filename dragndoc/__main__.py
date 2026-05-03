@@ -1,6 +1,6 @@
-"""Allows ``python -m automafile`` invocation."""
+"""Allows ``python -m dragndoc`` invocation."""
 
-from automafile.cli import app
+from dragndoc.cli import app
 
 
 if __name__ == "__main__":

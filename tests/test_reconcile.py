@@ -5,10 +5,10 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from automafile.metadata import sidecar
-from automafile.metadata.hashing import hash_file
-from automafile.metadata.reconcile import find_orphans
-from automafile.metadata.schema import MetadataDoc, OcrBlock
+from dragndoc.metadata import sidecar
+from dragndoc.metadata.hashing import hash_file
+from dragndoc.metadata.reconcile import find_orphans
+from dragndoc.metadata.schema import MetadataDoc, OcrBlock
 
 
 def _seed_with_sidecar(file_path: Path, payload: bytes) -> None:
