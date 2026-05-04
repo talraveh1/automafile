@@ -69,6 +69,7 @@ class TrayState:
     last_notification: Optional[str] = None
     notifications_enabled: bool = True
     action_items: int = 0
+    running_label: Optional[str] = None  # "Digesting foo.pdf", "Scanning…", or None for idle
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_notification(self, title: str, body: str) -> None:
@@ -83,6 +84,10 @@ class TrayState:
         with self._lock:
             return self.action_items > 0
 
+    def set_running(self, label: Optional[str]) -> None:
+        with self._lock:
+            self.running_label = label
+
     def toggle_notifications(self) -> bool:
         with self._lock:
             self.notifications_enabled = not self.notifications_enabled
@@ -94,32 +99,73 @@ class TrayState:
 
     def status_text(self) -> str:
         with self._lock:
-            if self.last_notification is None:
-                return "No notifications yet"
-            return _truncate(self.last_notification, 80)
+            if self.running_label:
+                return _truncate(self.running_label, 80)
+            if self.action_items > 0:
+                noun = "file" if self.action_items == 1 else "files"
+                return f"{self.action_items} {noun} ready for triage"
+            if self.last_notification is not None:
+                return _truncate(self.last_notification, 80)
+            return "Idle"
 
 
 def _truncate(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def _format_toast(event: dict[str, Any]) -> tuple[str, str]:
-    """Map an event row to ``(title, body)`` for the toast.
+def _format_toast(event: dict[str, Any]) -> Optional[tuple[str, str]]:
+    """Map an event row to ``(title, body)`` for a toast, or ``None`` to skip.
 
-    ``event`` is ``{id, ts, kind, payload}`` where ``payload`` is the dict
-    of named fields that ``events.append(kind, **fields)`` was called with.
+    Run-state events (``digest_started``, ``scan_*``) update the tray label
+    only — they don't pop a notification. ``digest_finished`` fires a single
+    "N files ready for triage" toast (only when the queue is non-empty).
     """
     kind = event.get("kind", "?")
     payload = event.get("payload") or {}
-    if kind == "processed":
+    if kind == "digest_finished":
+        ready = int(payload.get("ready_count") or 0)
+        failed = int(payload.get("failed") or 0)
+        if ready > 0:
+            noun = "file" if ready == 1 else "files"
+            return "Drag'n'Doc", f"{ready} {noun} ready for triage"
+        if failed > 0:
+            f = payload.get("file") or "?"
+            return "Drag'n'Doc error", f"failed to digest {f}"
+        return None
+    if kind == "scan_finished":
+        return None  # silent
+    if kind in {"digest_started", "scan_started"}:
+        return None  # silent — these only adjust the tray status line
+    if kind == "error":
+        return "Drag'n'Doc error", f"{payload.get('file', '?')}: {payload.get('error', '?')}"
+    if kind == "processed":  # legacy event from older pipelines
         body = f"{payload.get('file', '?')} → {payload.get('category', '?')}"
         target = payload.get("target")
         if target:
             body += f" ({target})"
         return "Drag'n'Doc", body
-    if kind == "error":
-        return "Drag'n'Doc error", f"{payload.get('file', '?')}: {payload.get('error', '?')}"
     return "Drag'n'Doc", f"{kind}: {payload}"
+
+
+def _apply_run_state(event: dict[str, Any], state: Optional[TrayState]) -> None:
+    """Mirror digest_started/finished and scan_started/finished into the tray label."""
+    if state is None:
+        return
+    kind = event.get("kind", "")
+    payload = event.get("payload") or {}
+    if kind == "digest_started":
+        scope = payload.get("scope")
+        if scope == "tree":
+            count = payload.get("count")
+            label = f"Digesting {count} files…" if count else "Digesting…"
+        else:
+            file = payload.get("file") or "…"
+            label = f"Digesting {file}"
+        state.set_running(label)
+    elif kind == "scan_started":
+        state.set_running("Scanning…")
+    elif kind in {"digest_finished", "scan_finished"}:
+        state.set_running(None)
 
 
 def _consume(cursor: Cursor, notifier: Notifier, state: Optional[TrayState] = None) -> Cursor:
@@ -138,14 +184,17 @@ def _consume(cursor: Cursor, notifier: Notifier, state: Optional[TrayState] = No
 
     enabled = state.is_enabled() if state is not None else True
     for event in rows:
-        title, body = _format_toast(event)
-        if enabled:
-            try:
-                notifier.notify(title, body)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("notifier.notify failed: %s", exc)
-        if state is not None:
-            state.record_notification(title, body)
+        _apply_run_state(event, state)
+        toast = _format_toast(event)
+        if toast is not None:
+            title, body = toast
+            if enabled:
+                try:
+                    notifier.notify(title, body)
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("notifier.notify failed: %s", exc)
+            if state is not None:
+                state.record_notification(title, body)
         cursor.last_id = max(cursor.last_id, int(event["id"]))
     return cursor
 
@@ -203,24 +252,14 @@ def _launch_triage() -> None:
 
 
 def _count_ready_for_triage() -> int:
-    """Files in the inbox tree that have a metadata row — i.e. processed and ready to file."""
-    from dragndoc.db import connect
-
-    settings = get_settings()
-    inbox = settings.inbox_path
-    if not inbox.exists():
-        return 0
-    inbox_rel = settings.inbox.rstrip("/") + "/"
+    """Number of inbox files queued for triage (filled by digest, drained by /triage)."""
     try:
-        with connect(readonly=True) as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM docs WHERE path LIKE ?",
-                (f"{inbox_rel}%",),
-            ).fetchone()
+        from dragndoc.triage_queue import count as q_count
+
+        return q_count(inbox_only=True)
     except Exception as exc:  # noqa: BLE001
-        log.debug("inbox count failed: %s", exc)
+        log.debug("triage_queue count failed: %s", exc)
         return 0
-    return int(row["n"] if row else 0)
 
 
 # ---------------------------------------------------------------------------

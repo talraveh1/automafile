@@ -3,8 +3,9 @@
 Settings are loaded from ``config.jsonc`` at the repo root. Nested keys may be
 overridden by environment variables that concatenate the group name with the
 leaf key, joined by ``_`` and uppercased — e.g. ``watch.settle`` becomes
-``WATCH_SETTLE``, ``ocr.min_text_chars`` becomes ``OCR_MIN_TEXT_CHARS``,
-top-level keys use their own uppercase form (``DOCS``, ``INBOX``, ``LOG``).
+``WATCH_SETTLE``, ``logs.level`` becomes ``LOGS_LEVEL``, ``ocr.min_text_chars``
+becomes ``OCR_MIN_TEXT_CHARS``, top-level keys use their own uppercase form
+(``DOCS``, ``INBOX``).
 """
 
 from __future__ import annotations
@@ -72,6 +73,13 @@ class WatchSettings(BaseModel):
     model_config = {"frozen": True}
 
 
+class LogsSettings(BaseModel):
+    level: str = "INFO"
+    max_lines: int = 10000
+    max_files: int = 5
+    model_config = {"frozen": True}
+
+
 class OcrSettings(BaseModel):
     max_total_chars: int = 6000
     min_text_chars: int = 100
@@ -98,8 +106,8 @@ class Settings(BaseModel):
 
     docs: Path
     inbox: str = "Inbox"
-    log: str = "INFO"
 
+    logs: LogsSettings = Field(default_factory=LogsSettings)
     watch: WatchSettings = Field(default_factory=WatchSettings)
     ocr: OcrSettings = Field(default_factory=OcrSettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
@@ -123,7 +131,6 @@ _DEFAULT_DOCS = REPO_ROOT / "documents-root"
 _TOP_LEVEL_DEFAULTS: dict[str, Any] = {
     "docs": str(_DEFAULT_DOCS),
     "inbox": "Inbox",
-    "log": "INFO",
     "data_dir": str(REPO_ROOT / "data"),
     # empty = derive from data_dir
     "db_path": "",
@@ -131,6 +138,7 @@ _TOP_LEVEL_DEFAULTS: dict[str, Any] = {
 }
 
 _SECTIONS: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
+    "logs": (LogsSettings, {"level": "INFO", "max_lines": 10000, "max_files": 5}),
     "watch": (WatchSettings, {"settle": 2.0, "polling": 5.0}),
     "ocr": (
         OcrSettings,

@@ -36,6 +36,14 @@ def append(kind: str, **fields: Any) -> None:
         log.warning("events.append failed (%s): %s", kind, exc)
 
 
+# Event kinds. Toaster reads these to drive both status and notifications.
+DIGEST_STARTED = "digest_started"      # payload: {scope, count?, file?}
+DIGEST_FINISHED = "digest_finished"    # payload: {scope, succeeded, failed, ready_count, file?, category?}
+SCAN_STARTED = "scan_started"          # payload: {scope, path?}
+SCAN_FINISHED = "scan_finished"        # payload: {seen, ready_count}
+ERROR = "error"                        # payload: {file, error}
+
+
 def fetch_since(last_id: int, *, limit: int = 500) -> list[dict[str, Any]]:
     """Read events with id > ``last_id`` in id-order.
 

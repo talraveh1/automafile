@@ -11,6 +11,20 @@ This skill files documents from the user's inbox into the managed tree. It is
 *project-scoped*; it knows about this repo's memory schema and the metadata
 written by the `dragndoc` Python pipeline. Don't try to reuse it elsewhere.
 
+## Default scope: inbox only
+
+By default `/triage` ONLY handles files inside `<docs>/<inbox>`. Files
+that already live elsewhere in the tree are left alone — you should reorganise
+them only when:
+
+1. The user explicitly asks to reorganise specific files (e.g.
+   `/triage <path>` or "please move these out of `Personal`"), OR
+2. The taxonomy itself changed (a new sub-category was added) and existing
+   files now belong somewhere new.
+
+Both cases use the same drain-the-queue flow below; you just widen the scope
+to `--all` when invoking the queue commands.
+
 ## Setup
 
 1. Read [memory/preferences.md](../../../memory/preferences.md),
@@ -18,79 +32,82 @@ written by the `dragndoc` Python pipeline. Don't try to reuse it elsewhere.
    [memory/corrections.jsonl](../../../memory/corrections.jsonl).
 2. Use `Bash` to run `dnd doctor` and confirm Tesseract +
    Ollama are reachable. If either is missing, halt and explain.
-3. Run `dnd scan --json` to get a fresh in-memory worklist. The scanner no
-   longer writes JSON to disk; the `--json` flag prints the result so you
-   can parse it directly.
+3. Run `dnd triage count` (inbox-only by default). If the queue is empty
+   but the user expects work, suggest `dnd digest` (which will populate
+   the queue) or `dnd triage rebuild` (one-shot seed from existing rows).
+
+## The triage queue
+
+The pipeline maintains a `triage_queue` table — every successful `dnd digest`
+adds a row, every `/triage` filing removes one. You drain it via:
+
+- `dnd triage list [--all] [--json]` — show pending entries (oldest first).
+- `dnd triage next [--all]` — JSON for the oldest pending entry. Does NOT
+  remove it; call `done` after you've filed the file.
+- `dnd triage done <abs-path>` — remove a row from the queue (after `dnd mv`).
+- `dnd triage count [--all]` — count pending entries.
+- `dnd triage rebuild [--all]` — seed the queue from existing `docs` rows
+  that aren't already queued (one-shot migration aid).
+
+**Default scope is inbox-only.** Pass `--all` only in the two reorganisation
+cases above.
 
 ## Drift / orphan review
 
-For each entry in `missing_files`, run `dnd review orphans` (which proposes
-hash-matched relinks). Pass `--yes-all` to auto-accept single-match relinks;
-multi-match cases will prompt interactively.
+For each entry in `dnd scan --json`'s `missing_files`, run `dnd review orphans`
+(which proposes hash-matched relinks). Pass `--yes-all` to auto-accept
+single-match relinks; multi-match cases will prompt interactively.
 
-## Build the queue
+NB: orphan/reconcile handling is currently being reworked; if it misbehaves,
+flag it to the user and skip — don't try to patch it inside this flow.
 
-Files in `<inbox>` (read directly) AND files flagged in the scan worklist
-as `files_needing_metadata`, `files_with_partial_metadata`, or
-`files_with_stale_metadata`. Sort by oldest filesystem mtime first.
+## Drain loop
 
-## For each document
+While `dnd triage count` > 0:
 
-1. Read its metadata row via `dnd meta get <path>` — prints JSON for one
-   file. Or `dnd meta cat <path>` for a markdown render with frontmatter.
-   The DB is the only source of truth; every file the pipeline has
-   touched has a row in `docs`.
-2. If the summary is present and ≥100 chars, use it.
-3. Otherwise run `dnd digest <path>` to generate it.
-4. If the summary is still empty/unusable, ask the user what the document is
-   about via `AskUserQuestion`.
+1. `dnd triage next` — JSON for the next entry. The payload contains the doc's
+   `path`, `category`, `title`, `summary`, `confidence`, etc. You usually have
+   everything you need without a separate `meta get` call.
+2. If the summary is empty/unusable, run `dnd digest <abs-path>` to refresh,
+   then re-pull `dnd triage next`. If still empty, ask the user via
+   `AskUserQuestion`.
 
-`digest` with no path scans the tree and digests everything that needs
-work. Each successful run sets the row's `digested` timestamp and `modified`
-field (the file's mtime at digest time). Subsequent runs skip files whose
-recorded `modified` covers the file's current mtime. Pass `--force` to redo
-everything regardless. Failed files are not marked and retry on the next run.
+3. **Decide filing.**
+   - Pick `category` from `taxonomy.md`. Use slash-separated form for nesting
+     (e.g. `Financial/Receipts`).
+   - Apply rules from `preferences.md` first; corrections.jsonl precedents
+     second; LLM enrichment third.
+   - Compose `smart_name` per `naming_convention` from preferences (default:
+     `{date} - {correspondent} - {topic}.{ext}`).
 
-## Decide filing
+4. **Auto-apply gate.** Auto-apply only when ALL hold:
+   - `confidence == high` (or `confirmed` if a human has signed off).
+   - The chosen category exists in `taxonomy.md`.
+   - The taxonomy hasn't been edited since the row was last digested
+     (compare `taxonomy.md`'s mtime to the row's `digested` timestamp).
 
-- Pick `category` from `taxonomy.md`. Use slash-separated form for nesting
-  (e.g. `Financial/Receipts`).
-- Apply rules from `preferences.md` first; corrections.jsonl precedents
-  second; LLM enrichment third.
-- Compose `smart_name` per `naming_convention` from preferences (default:
-  `{date} - {correspondent} - {topic}.{ext}`).
+   Otherwise ask the user via `AskUserQuestion`.
 
-## Auto-apply gate
+5. **Apply.** Compute the destination path from the chosen category and smart
+   filename, then run `dnd mv <src> <dst> [-f]`. It moves the file and updates
+   the DB row's `path` together. Never `mv` / `move` a file directly with the
+   OS — the row would be left pointing at the old path.
 
-Auto-apply only when ALL hold:
+   For metadata-only edits use `dnd meta set <path> category=...`,
+   `dnd meta edit <path>`, or `dnd meta apply <path> <file.md>`.
 
-1. `confidence == high` (or `confirmed` if a human has signed off).
-2. The chosen category exists in `taxonomy.md`.
-3. The taxonomy hasn't been edited since the row was last digested (compare
-   file mtime of `taxonomy.md` to the row's `digested` timestamp).
-
-Otherwise, ask the user via `AskUserQuestion`.
-
-## Apply
-
-Compute the destination path from the chosen category and smart filename,
-then run `dnd mv <src> <dst> [-f]`. It moves the file and updates the DB
-row's `path` together; orphaned rows can be relinked later via
-`dnd review orphans`.
-
-Never `mv` / `move` a file directly with the OS — the DB row will be left
-pointing at the old path. Always go through `dnd mv`.
-
-To edit a single field on a row (e.g. correct the category), use
-`dnd meta set <path> category=Financial/Receipts`. For broader edits open
-`dnd meta edit <path>` (frontmatter editor) or apply a markdown file with
-`dnd meta apply <path> <file.md>`.
+6. **Drain the queue.** After a successful move, run
+   `dnd triage done <abs-dst-path>` to remove the entry. (`dnd rm` removes
+   automatically via FK cascade; `dnd mv` does NOT — it just updates the
+   path. The skill is responsible for calling `done`.)
 
 ## Cluster + propose new categories
 
 If three or more documents in this run share a strong topical cluster that
 isn't in the taxonomy, propose a new category to the user (single docs never
-spawn one). On acceptance, edit `memory/taxonomy.md`.
+spawn one). On acceptance, edit `memory/taxonomy.md`. After that, you may
+need to widen scope to `--all` to reorganise existing files into the new
+sub-category.
 
 ## Learn
 
@@ -105,9 +122,9 @@ After three similar corrections, propose a new rule for `preferences.md`.
 
 ## OCR review
 
-At the end of the session, walk `ocr_review_candidates` from the scan. For
-each: ask user; on yes, run `dnd review ocr --yes-all` scoped to that file
-(or invoke interactively).
+At the end of the session, run `dnd scan --json` and walk
+`ocr_review_candidates`. For each: ask user; on yes, run
+`dnd review ocr --yes-all` scoped to that file (or invoke interactively).
 
 ## Wrap up
 

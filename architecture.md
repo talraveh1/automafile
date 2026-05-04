@@ -20,10 +20,10 @@ flowchart LR
       writers["<b>Meta Store</b><br/><i>upsert docs+ocr<br/>FTS5 mirror</i>"]:::write
    end
 
-   db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · events · docs_fts</i>")]:::journal
+   db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · events<br/>triage_queue · docs_fts</i>")]:::journal
    toaster["<b>Toaster</b><br/><i>host process<br/>polls events.id</i>"]:::notify
 
-   cli["<b>CLI</b><br/><i>process · scan · review<br/>meta get/cat/set/edit · grep<br/>mv · cp · rm · ls</i>"]:::tool
+   cli["<b>CLI</b><br/><i>digest · scan · review<br/>meta get/cat/set/edit · grep<br/>mv · cp · rm · ls<br/>triage list/next/done</i>"]:::tool
    triage[/"🗂️ Triage skill"/]:::tool
 
    inbox --> watcher --> pipeline
@@ -31,6 +31,7 @@ flowchart LR
    pipeline --> ocr --> ocr_decision --> output
    llm --> writers
    writers -->|upsert| db
+   writers -.->|enqueue| db
    db -->|poll by id| toaster
    triage <-.-> cli
    style extract fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#0f172a
@@ -65,8 +66,13 @@ flowchart LR
    considered). The original document is never touched. SQLite triggers
    keep `docs_fts` (FTS5 over `title`/`summary`/`notes`/`tags`/`parties`)
    in sync automatically.
-8. The pipeline appends a `processed` event row to the `events` table.
-   The pipeline never renders notifications itself.
+8. The pipeline enqueues the file in `triage_queue` (one row per `doc_id`,
+   stamped with `enqueued_at`). The `/triage` skill drains this queue via
+   `dnd triage next` / `dnd triage done`. Removing a `docs` row cascades
+   into `triage_queue`; `dnd mv` doesn't (the row's path simply updates).
+9. Run-state events are appended to `events`: `digest_started` /
+   `digest_finished` and `scan_started` / `scan_finished`. The pipeline
+   never renders notifications itself.
 
 ## Storage layout
 
@@ -93,10 +99,42 @@ ORDER BY id LIMIT 500` once per second, persists the highest-seen id to
 `data/toaster.cursor` after every fired toast (so restarts never miss
 or duplicate), and renders Windows toasts via the debounced `Notifier`.
 
+The tray status line is built from three signals:
+
+- A `digest_started` / `scan_started` event sets a "Digesting…" /
+  "Scanning…" label; the matching `_finished` event clears it.
+- When idle, the line shows "N files ready for triage" — read directly
+  from `triage_queue` (inbox-scope by default).
+- Falls back to the most recent toast title/body, then `Idle`.
+
+Only `digest_finished` (when `ready_count > 0`) and `error` events
+trigger Windows toasts. Run-state events update the status line
+silently; that way a tree-level digest produces one notification at the
+end ("4 files ready for triage") instead of one per file.
+
 This decoupling lets the pipeline run inside a container while the
 toaster runs on the host — the bind-mounted `data/` directory is the
 only shared surface needed (the toaster opens the SQLite file
 read-only).
+
+## Triage queue
+
+`triage_queue` holds the doc_ids that are awaiting filing — one row per
+`docs.id`, stamped with `enqueued_at` and a short `reason` ("digested",
+"rebuild"). The pipeline writes here on every successful `digest_file`;
+the `/triage` skill drains it by calling `dnd triage next` (peek) and
+then `dnd triage done <abs-path>` after `dnd mv`.
+
+Default scope is inbox-only: `dnd triage list/count/next/clear` filter to
+`<inbox>/%` paths so /triage doesn't disturb already-filed documents.
+`--all` widens to the whole tree (used during taxonomy reorganisations).
+`dnd triage rebuild` is a one-shot migration aid that seeds the queue
+from existing `docs` rows.
+
+Foreign-key cascade keeps things tidy: `dnd rm` deletes the queue row
+along with the `docs` row; `dnd mv` only updates the row's path, leaving
+the queue entry intact (still pending until /triage explicitly removes
+it).
 
 ## Scanner
 

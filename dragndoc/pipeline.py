@@ -178,6 +178,13 @@ def digest_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -
     result.doc_id = upsert(new_doc)
     result.metadata_target = "db"
 
+    from dragndoc.triage_queue import enqueue as triage_enqueue
+
+    try:
+        triage_enqueue(result.doc_id, reason="digested")
+    except Exception as exc:  # noqa: BLE001
+        log.warning("triage_queue enqueue failed for %s: %s", path, exc)
+
     result.duration_ms = int((time.perf_counter() - started) * 1000)
     log.info(
         "digested %s | ocr=%s tier=%s category=%s target=%s id=%s | %dms",

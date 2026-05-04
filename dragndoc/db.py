@@ -21,7 +21,7 @@ from dragndoc.log import get_logger
 log = get_logger(__name__)
 
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -99,6 +99,13 @@ CREATE TABLE IF NOT EXISTS events (
     payload TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS ix_events_id ON events(id);
+
+CREATE TABLE IF NOT EXISTS triage_queue (
+    doc_id      INTEGER PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
+    enqueued_at TEXT NOT NULL,
+    reason      TEXT NOT NULL DEFAULT 'digested'
+);
+CREATE INDEX IF NOT EXISTS ix_triage_enqueued ON triage_queue(enqueued_at);
 
 CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,

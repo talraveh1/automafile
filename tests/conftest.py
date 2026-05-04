@@ -15,7 +15,7 @@ def isolated_env(tmp_path, monkeypatch):
     (docs_root / "Inbox").mkdir()
     monkeypatch.setenv("DOCS", str(docs_root))
     monkeypatch.setenv("INBOX", "Inbox")
-    monkeypatch.setenv("LOG", "WARNING")
+    monkeypatch.setenv("LOGS_LEVEL", "WARNING")
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     from dragndoc.config import reset_settings
     reset_settings()

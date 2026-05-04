@@ -18,10 +18,11 @@ Files live in the user's filesystem under `<docs>/<inbox>`
 OCR when needed, calls Ollama for enrichment, and writes metadata to
 **`data/dragndoc.db`** — a single SQLite file, never on OneDrive. Every
 file with metadata gets a row in `docs` (plus an optional row in `ocr`).
-Original documents are never modified. The `/triage` skill decides where
-each file is filed; moves go through `dnd mv` so the row's `path` is
-updated to follow the file. Read metadata with `dnd meta get <path>`
-(JSON) or `dnd meta cat <path>` (markdown + frontmatter); search with
+Original documents are never modified. After a successful digest, the
+file is enqueued in `triage_queue`; the `/triage` skill drains the queue
+via `dnd triage next` / `dnd mv` / `dnd triage done`, defaulting to
+inbox-only scope. Read metadata with `dnd meta get <path>` (JSON) or
+`dnd meta cat <path>` (markdown + frontmatter); search with
 `dnd grep <query>` (FTS5).
 
 ## Run modes

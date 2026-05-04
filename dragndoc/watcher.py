@@ -10,10 +10,16 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers.polling import PollingObserver
 
 from dragndoc.config import get_settings
+from dragndoc.events import (
+    DIGEST_FINISHED,
+    DIGEST_STARTED,
+    ERROR,
+    append as append_event,
+)
 from dragndoc.log import get_logger
-from dragndoc.events import append as append_event
 from dragndoc.pipeline import digest_file, format_result_line
 from dragndoc.treewalk import BLOCK_MARKER_FILENAME, is_in_blocked_subtree
+from dragndoc.triage_queue import count as triage_count
 
 
 log = get_logger(__name__)
@@ -60,17 +66,30 @@ class _InboxHandler(FileSystemEventHandler):
             if not path.exists():
                 return
             log.info("Digesting new file: %s", path)
-            result = digest_file(path)
+            append_event(DIGEST_STARTED, scope="file", file=path.name)
+            try:
+                result = digest_file(path)
+            finally:
+                pass
             log.info(format_result_line(result))
-            if not result.error:
-                append_event(
-                    "processed",
-                    file=path.name,
-                    category=result.category,
-                    target=result.metadata_target,
-                )
+            if result.error:
+                append_event(ERROR, file=path.name, error=result.error)
+            try:
+                ready = triage_count()
+            except Exception:  # noqa: BLE001
+                ready = 0
+            append_event(
+                DIGEST_FINISHED,
+                scope="file",
+                file=path.name,
+                succeeded=0 if result.error else 1,
+                failed=1 if result.error else 0,
+                category=result.category,
+                ready_count=ready,
+            )
         except Exception as exc:  # noqa: BLE001
             log.exception("Unhandled error while processing %s: %s", path, exc)
+            append_event(ERROR, file=path.name, error=str(exc))
         finally:
             with self._lock:
                 self._inflight.discard(path)

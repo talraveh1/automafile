@@ -53,10 +53,17 @@ toaster_app = typer.Typer(
     context_settings=HELP_CONTEXT_SETTINGS,
     help="Control the Windows toaster (run on the host).",
 )
+triage_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+    help="Inspect / drain the triage queue (filled by digest, drained by /triage).",
+)
 app.add_typer(watch_app, name="watch")
 app.add_typer(review_app, name="review")
 app.add_typer(meta_app, name="meta")
 app.add_typer(toaster_app, name="toaster")
+app.add_typer(triage_app, name="triage")
 
 
 def _maybe_override_docs(docs: Path | None) -> None:
@@ -199,13 +206,25 @@ def digest(
 ) -> None:
     """Digest a single file or scan the tree and digest everything that needs it."""
     from dragndoc.config import get_settings
+    from dragndoc.events import DIGEST_FINISHED, DIGEST_STARTED, append as append_event
     from dragndoc.pipeline import digest_file, format_result_line
+    from dragndoc.triage_queue import count as triage_count
 
     settings = get_settings()
     if path is not None:
         log.info("CLI: digest %s (dry_run=%s force_ocr=%s)", path, dry_run, force_ocr)
+        append_event(DIGEST_STARTED, scope="file", file=path.name)
         result = digest_file(path, dry_run=dry_run, force_ocr=force_ocr)
         typer.echo(format_result_line(result))
+        append_event(
+            DIGEST_FINISHED,
+            scope="file",
+            file=path.name,
+            succeeded=0 if result.error else 1,
+            failed=1 if result.error else 0,
+            category=result.category,
+            ready_count=triage_count(),
+        )
         if result.error:
             raise typer.Exit(1)
         return
@@ -237,8 +256,10 @@ def _is_digested_fresh(rel: str, file_path: Path) -> bool:
 
 
 def _digest_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_on_error: bool) -> None:
+    from dragndoc.events import DIGEST_FINISHED, DIGEST_STARTED, append as append_event
     from dragndoc.pipeline import digest_file, format_result_line
     from dragndoc.scanner import run_scan
+    from dragndoc.triage_queue import count as triage_count
 
     log.info("CLI: digest tree (dry_run=%s force_ocr=%s force=%s)", dry_run, force_ocr, force)
     wl = run_scan()
@@ -281,21 +302,32 @@ def _digest_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_
         msg += f" ({skipped} already-digested skipped; use --force to redo)"
     typer.echo(msg)
 
+    append_event(DIGEST_STARTED, scope="tree", count=len(todo))
+
     failures = 0
-    for rel in todo:
-        full = settings.docs / rel
-        if not full.exists():
-            typer.echo(f"{rel} | MISSING under {settings.docs}")
-            failures += 1
-            if stop_on_error:
-                raise typer.Exit(1)
-            continue
-        result = digest_file(full, dry_run=dry_run, force_ocr=force_ocr)
-        typer.echo(format_result_line(result))
-        if result.error:
-            failures += 1
-            if stop_on_error:
-                raise typer.Exit(1)
+    try:
+        for rel in todo:
+            full = settings.docs / rel
+            if not full.exists():
+                typer.echo(f"{rel} | MISSING under {settings.docs}")
+                failures += 1
+                if stop_on_error:
+                    raise typer.Exit(1)
+                continue
+            result = digest_file(full, dry_run=dry_run, force_ocr=force_ocr)
+            typer.echo(format_result_line(result))
+            if result.error:
+                failures += 1
+                if stop_on_error:
+                    raise typer.Exit(1)
+    finally:
+        append_event(
+            DIGEST_FINISHED,
+            scope="tree",
+            succeeded=len(todo) - failures,
+            failed=failures,
+            ready_count=triage_count(),
+        )
 
     typer.echo(f"done: {len(todo) - failures}/{len(todo)} succeeded")
     if failures:
@@ -314,9 +346,20 @@ def scan(
         from dragndoc.config import reset_settings
         reset_settings()
     log.info("CLI: scan (path=%s, json=%s)", path, print_json)
+    from dragndoc.events import SCAN_FINISHED, SCAN_STARTED, append as append_event
     from dragndoc.scanner import run_scan
+    from dragndoc.triage_queue import count as triage_count
 
-    wl = run_scan(subpath=path)
+    append_event(SCAN_STARTED, scope="subpath" if path else "tree", path=str(path) if path else None)
+    wl = None
+    try:
+        wl = run_scan(subpath=path)
+    finally:
+        try:
+            ready = triage_count()
+        except Exception:  # noqa: BLE001
+            ready = 0
+        append_event(SCAN_FINISHED, seen=wl.files_seen if wl else 0, ready_count=ready)
     if print_json:
         typer.echo(json.dumps(wl.to_dict(), indent=2, ensure_ascii=False))
         return
@@ -865,6 +908,127 @@ def toaster_uninstall() -> None:
     log.info("CLI: toaster uninstall")
     from dragndoc.toaster_setup import uninstall
     raise typer.Exit(uninstall())
+
+
+# ---------------------------------------------------------------------------
+# triage queue
+# ---------------------------------------------------------------------------
+
+
+def _triage_entry_to_dict(entry) -> dict:
+    """Flatten a QueueEntry to a JSON-friendly dict including the doc fields."""
+    d = asdict(entry.doc)
+    return {
+        "doc_id": entry.doc.id,
+        "path": entry.doc.path,
+        "category": entry.doc.category,
+        "title": entry.doc.title,
+        "summary": entry.doc.summary,
+        "confidence": entry.doc.confidence,
+        "enqueued_at": entry.enqueued_at,
+        "reason": entry.reason,
+        "doc": d,
+    }
+
+
+@triage_app.command("count")
+def triage_count_cmd(
+    all_: Annotated[bool, typer.Option("--all", help="Count everything in the queue, not just inbox files.")] = False,
+) -> None:
+    """Print the number of files awaiting triage."""
+    from dragndoc.triage_queue import count as q_count
+
+    typer.echo(str(q_count(inbox_only=not all_)))
+
+
+@triage_app.command("list")
+def triage_list_cmd(
+    all_: Annotated[bool, typer.Option("--all", help="Show everything queued, not just inbox files.")] = False,
+    print_json: Annotated[bool, typer.Option("--json", help="Print full queue as JSON.")] = False,
+) -> None:
+    """List files awaiting triage, oldest first."""
+    from dragndoc.triage_queue import list_queue
+
+    entries = list_queue(inbox_only=not all_)
+    if print_json:
+        typer.echo(json.dumps([_triage_entry_to_dict(e) for e in entries], indent=2, ensure_ascii=False, default=str))
+        return
+    if not entries:
+        typer.echo("(queue empty)")
+        return
+    for e in entries:
+        typer.echo(f"{e.enqueued_at}  {e.doc.path}  [{e.doc.category}]  {e.reason}")
+
+
+@triage_app.command("next")
+def triage_next_cmd(
+    all_: Annotated[bool, typer.Option("--all", help="Don't restrict to inbox; pull the oldest entry from anywhere.")] = False,
+    print_json: Annotated[bool, typer.Option("--json/--no-json", help="Print full doc + queue metadata as JSON (default). Use --no-json for a one-line summary.")] = True,
+) -> None:
+    """Peek at the next item to triage. Does NOT remove it; call `dnd triage done` after filing."""
+    from dragndoc.triage_queue import next_entry
+
+    entry = next_entry(inbox_only=not all_)
+    if entry is None:
+        if print_json:
+            typer.echo("null")
+        else:
+            typer.echo("(queue empty)")
+        raise typer.Exit(1)
+    if print_json:
+        typer.echo(json.dumps(_triage_entry_to_dict(entry), indent=2, ensure_ascii=False, default=str))
+    else:
+        typer.echo(f"{entry.doc.path}  [{entry.doc.category}]  enqueued={entry.enqueued_at}  reason={entry.reason}")
+
+
+@triage_app.command("done")
+def triage_done_cmd(
+    path: Annotated[Path, typer.Argument(help="File path to remove from the queue.")],
+) -> None:
+    """Remove a file from the triage queue (call after filing it)."""
+    from dragndoc.meta_store import relative_to_root
+    from dragndoc.triage_queue import dequeue_by_path
+
+    rel = relative_to_root(path)
+    removed = dequeue_by_path(rel)
+    if removed:
+        typer.echo(f"removed: {rel}")
+    else:
+        typer.echo(f"not in queue: {rel}", err=True)
+        raise typer.Exit(1)
+
+
+@triage_app.command("rebuild")
+def triage_rebuild_cmd(
+    all_: Annotated[bool, typer.Option("--all", help="Seed from every doc, not just inbox files.")] = False,
+) -> None:
+    """Seed the queue from existing docs that aren't already queued. One-shot migration aid."""
+    from dragndoc.triage_queue import rebuild_from_existing_docs
+
+    n = rebuild_from_existing_docs(inbox_only=not all_)
+    typer.echo(f"enqueued: {n}")
+
+
+@triage_app.command("clear")
+def triage_clear_cmd(
+    all_: Annotated[bool, typer.Option("--all", help="Empty the entire queue, not just inbox entries.")] = False,
+    yes: Annotated[bool, typer.Option("-y", "--yes", help="Skip confirmation prompt.")] = False,
+) -> None:
+    """Empty the triage queue (default scope: inbox only)."""
+    from dragndoc.triage_queue import clear, count as q_count
+
+    n = q_count(inbox_only=not all_)
+    if n == 0:
+        typer.echo("(queue empty)")
+        return
+    if not yes:
+        scope = "all queued" if all_ else "queued inbox"
+        confirm = typer.prompt(f"Remove {n} {scope} entries? [y/N]", default="N")
+        if not confirm.lower().startswith("y"):
+            typer.echo("aborted")
+            raise typer.Exit(1)
+    removed = clear(inbox_only=not all_)
+    typer.echo(f"removed: {removed}")
 
 
 def main() -> None:  # pragma: no cover

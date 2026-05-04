@@ -12,7 +12,7 @@ services:
     environment:
       DOCS: /docs
       OLLAMA_URL: http://host.docker.internal:11434
-      LOG: INFO
+      LOGS_LEVEL: INFO
 
     volumes:
       # the project workspace — code lives on the host, runs in the container

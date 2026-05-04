@@ -3,9 +3,10 @@
 // Copy this file to config.jsonc and adjust to your environment.
 //
 // Environment variables override these values. Top-level keys map to their
-// uppercase form (e.g. DOCS, INBOX, LOG); nested keys concatenate the group
+// uppercase form (e.g. DOCS, INBOX); nested keys concatenate the group
 // name and the leaf key, joined by `_` and uppercased — e.g. watch.settle is
-// overridden by WATCH_SETTLE, ocr.min_text_chars by OCR_MIN_TEXT_CHARS.
+// overridden by WATCH_SETTLE, logs.level by LOGS_LEVEL, ocr.min_text_chars
+// by OCR_MIN_TEXT_CHARS.
 
 {
   // Root of the user's documents tree. The pipeline only reads/writes within
@@ -17,7 +18,13 @@
   "inbox": "Inbox",
 
   // Logging level: DEBUG | INFO | WARNING | ERROR.
-  "log": "INFO",
+  "logs": {
+    "level": "INFO",
+    // Roll the active log file once it reaches this many lines.
+    "max_lines": 10000,
+    // Keep at most this many log files (current + rotated backups).
+    "max_files": 5
+  },
 
   // Watcher behaviour.
   "watch": {
