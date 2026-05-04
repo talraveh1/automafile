@@ -32,8 +32,8 @@ def _resolve_tesseract_bin() -> str | None:
     # honor the configured path only if it actually exists; otherwise fall
     # through (this matters when running the host's config.jsonc inside a
     # Linux container where the Windows-style path is invalid)
-    if settings.tesseract_bin and Path(settings.tesseract_bin).exists():
-        return settings.tesseract_bin
+    if settings.tesseract.bin and Path(settings.tesseract.bin).exists():
+        return settings.tesseract.bin
     found = shutil.which("tesseract")
     if found:
         return found
@@ -55,7 +55,7 @@ def _configure_pytesseract() -> str | None:
             pytesseract.pytesseract.tesseract_cmd = bin_path
         except ImportError:
             return None
-    tessdata = get_settings().tessdata_prefix or os.environ.get("TESSDATA_PREFIX")
+    tessdata = get_settings().tesseract.prefix or os.environ.get("TESSDATA_PREFIX")
     if tessdata and Path(tessdata).exists():
         os.environ["TESSDATA_PREFIX"] = tessdata
     return bin_path
@@ -106,12 +106,12 @@ def tesseract_languages() -> list[str]:
 
 def should_ocr_page(text: str) -> bool:
     settings = get_settings()
-    return len((text or "").strip()) < settings.ocr_min_page_chars
+    return len((text or "").strip()) < settings.ocr.min_page_chars
 
 
 def ocr_image(image, langs: str | None = None) -> str:
     settings = get_settings()
-    langs = langs or settings.tesseract_langs
+    langs = langs or settings.tesseract.langs
     bin_path = _configure_pytesseract()
     if not bin_path:
         raise RuntimeError("Tesseract is not installed or configured.")
@@ -154,15 +154,15 @@ def pdf_ocr_decision(path: Path, per_page_chars: list[int] | None = None) -> Ocr
             per_page_chars.append(len(t.strip()))
 
     total = sum(per_page_chars)
-    if total < settings.ocr_min_text_chars:
+    if total < settings.ocr.min_text_chars:
         log.debug("pdf_ocr_decision %s: ocr_full (no_text_layer; %d total chars)", path.name, total)
         return OcrDecision(action="ocr_full", reason="no_text_layer")
 
-    sparse = [i for i, c in enumerate(per_page_chars) if c < settings.ocr_min_page_chars]
+    sparse = [i for i, c in enumerate(per_page_chars) if c < settings.ocr.min_page_chars]
     if not sparse:
         log.debug("pdf_ocr_decision %s: no_ocr (%d pages, %d chars)", path.name, len(per_page_chars), total)
         return OcrDecision(action="no_ocr")
-    if len(sparse) <= max(1, int(len(per_page_chars) * settings.ocr_sparse_page_ratio)):
+    if len(sparse) <= max(1, int(len(per_page_chars) * settings.ocr.sparse_page_ratio)):
         log.debug("pdf_ocr_decision %s: ocr_pages (%d sparse of %d)", path.name, len(sparse), len(per_page_chars))
         return OcrDecision(action="ocr_pages", pages=sparse, reason="sparse_pages")
     log.debug("pdf_ocr_decision %s: ocr_full (majority sparse, %d/%d)", path.name, len(sparse), len(per_page_chars))
@@ -192,7 +192,7 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
     """Run OCR on an image or PDF and return concatenated text."""
     import time as _time
     settings = get_settings()
-    langs = langs or settings.tesseract_langs
+    langs = langs or settings.tesseract.langs
     bin_path = _configure_pytesseract()
     if not bin_path:
         raise RuntimeError("Tesseract is not installed or configured.")

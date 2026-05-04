@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import signal
 import subprocess
 import sys
@@ -13,6 +12,7 @@ from typing import Callable, Protocol
 
 from dragndoc.config import get_settings
 from dragndoc.log import get_logger
+from dragndoc.process import pid_alive
 
 
 log = get_logger(__name__)
@@ -85,20 +85,11 @@ def _clear_pid(paths: RuntimePaths) -> None:
     paths.pid_file.unlink(missing_ok=True)
 
 
-def _pid_is_alive(pid: int) -> bool:
-    try:
-        # On POSIX, signal 0 probes whether the pid still exists.
-        os.kill(pid, 0)
-    except OSError:
-        return False
-    return True
-
-
 def status_snapshot(paths: RuntimePaths | None = None) -> dict[str, object]:
     paths = paths or runtime_paths()
     disabled = paths.disabled_file.exists()
     pid = _read_pid(paths)
-    running = pid is not None and _pid_is_alive(pid)
+    running = pid is not None and pid_alive(pid)
     if running:
         state = "running"
     elif disabled:
@@ -133,7 +124,7 @@ def wait_for_running(
 def _spawn_watcher() -> WatcherProcess:
     settings = get_settings()
     return subprocess.Popen(
-        [sys.executable, "-m", "dragndoc", "watch"],
+        [sys.executable, "-c", "from dragndoc.watcher import run_watcher; run_watcher()"],
         cwd=str(settings.repo_root),
     )
 

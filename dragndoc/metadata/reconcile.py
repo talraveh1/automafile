@@ -34,13 +34,13 @@ class OrphanReport:
 def find_orphans(root: Path | None = None) -> list[OrphanReport]:
     """Return rows whose ``path`` doesn't resolve to a file on disk.
 
-    For each, walk ``root`` (defaulting to ``documents_root``) and report
+    For each, walk ``root`` (defaulting to ``docs``) and report
     any files whose size matches the recorded ``size`` AND hash matches
     the recorded ``hash``. The size check first lets us skip almost every
     file in a typical tree; only size-matching candidates get hashed.
     """
     settings = get_settings()
-    walk_root = root or settings.documents_root
+    walk_root = root or settings.docs
 
     with connect(readonly=True) as conn:
         rows = conn.execute("SELECT id, path, hash, size FROM docs").fetchall()
@@ -48,7 +48,7 @@ def find_orphans(root: Path | None = None) -> list[OrphanReport]:
     missing: list[OrphanReport] = []
     sizes_to_check: dict[int, list[OrphanReport]] = {}
     for r in rows:
-        full = settings.documents_root / r["path"]
+        full = settings.docs / r["path"]
         if full.exists():
             continue
         report = OrphanReport(
@@ -89,7 +89,7 @@ def find_orphans(root: Path | None = None) -> list[OrphanReport]:
 
 
 def relink(doc_id: int, new_path: Path) -> None:
-    """Update an orphan row to point at ``new_path`` (relative to ``documents_root``)."""
+    """Update an orphan row to point at ``new_path`` (relative to ``docs``)."""
     from dragndoc.meta_store import relative_to_root
 
     rel = relative_to_root(new_path)

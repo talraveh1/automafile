@@ -29,8 +29,8 @@ _PREFERENCES = """\
 Edit these freely. The `/triage` skill reads them on every run.
 
 ```yaml
-documents_root: C:\\Users\\trax7\\OneDrive\\Documents
-inbox_dir: Inbox
+docs: C:\\Users\\trax7\\OneDrive\\Documents
+inbox: Inbox
 keep_inbox_copy: false
 auto_apply: high_only
 new_category_threshold: 3
@@ -83,7 +83,7 @@ def bootstrap(*, force: bool = False) -> None:
     bootstrap_schema(settings.db_path)
 
     # documents tree (only the inbox; category folders appear on first filing)
-    settings.documents_root.mkdir(parents=True, exist_ok=True)
+    settings.docs.mkdir(parents=True, exist_ok=True)
     settings.inbox_path.mkdir(parents=True, exist_ok=True)
 
     # memory dir

@@ -84,7 +84,7 @@ def propose_filing(meta: dict, *, default_category: str = "Unknown") -> FilingPr
 
 def target_path_for(proposal: FilingProposal) -> Path:
     settings = get_settings()
-    base = settings.documents_root / slugify(proposal.category)
+    base = settings.docs / slugify(proposal.category)
     if proposal.subcategory:
         base = base / slugify(proposal.subcategory)
     return base / proposal.smart_name

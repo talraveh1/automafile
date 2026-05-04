@@ -117,7 +117,7 @@ def extract(path: Path) -> ExtractedDoc:
                     ocr_unavailable = True
                 else:
                     try:
-                        section_text = run_ocr(path, langs=settings.tesseract_langs, pages=[page_index])
+                        section_text = run_ocr(path, langs=settings.tesseract.langs, pages=[page_index])
                         ocr_pages.append(page_index)
                     except Exception as exc:  # noqa: BLE001
                         ocr_failed = True

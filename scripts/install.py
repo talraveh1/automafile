@@ -55,10 +55,10 @@ def main() -> int:
     print()
     print("Bootstrap complete. Next steps:")
     print(f"  1. Edit {REPO / 'config.jsonc'} if your defaults differ.")
-    print("  2. Pin <documents_root>\\<inbox_dir> to 'Always keep on this device' in OneDrive.")
+    print("  2. Pin <docs>\\<inbox> to 'Always keep on this device' in OneDrive.")
     print(f"  3. Start the watcher: {dnd} watch start --fg")
-    print(f"  4. Start the toaster (separate terminal): {dnd} toaster")
-    print( "     (or run 'python scripts\\toaster.py' to auto-start it at logon)")
+    print(f"  4. Start the toaster: {dnd} toaster start")
+    print(f"     (or '{dnd} toaster install' to auto-start it at logon)")
     return 0
 
 

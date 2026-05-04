@@ -8,7 +8,7 @@ from unittest.mock import patch
 from dragndoc.llm import EnrichmentResult
 from dragndoc.meta_store import get_by_file
 from dragndoc.metadata.schema import OcrBlock
-from dragndoc.pipeline import process_file
+from dragndoc.pipeline import digest_file
 
 
 _FAKE = EnrichmentResult(
@@ -23,11 +23,11 @@ _FAKE = EnrichmentResult(
 )
 
 
-def test_process_text_file_writes_row(docs_root):
+def test_digest_text_file_writes_row(docs_root):
     p = docs_root / "Inbox" / "note.txt"
     p.write_text("Hebrew test שלום", encoding="utf-8")
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
-        result = process_file(p)
+        result = digest_file(p)
     assert result.error is None
     assert result.metadata_target == "db"
     assert result.doc_id is not None
@@ -38,17 +38,17 @@ def test_process_text_file_writes_row(docs_root):
     assert doc.title == "Fake title"
 
 
-def test_process_dry_run_does_not_write(docs_root):
+def test_digest_dry_run_does_not_write(docs_root):
     p = docs_root / "Inbox" / "note.txt"
     p.write_text("hi", encoding="utf-8")
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
-        result = process_file(p, dry_run=True)
+        result = digest_file(p, dry_run=True)
     assert result.metadata_target == "dry_run"
     assert result.doc_id is None
     assert get_by_file(p) is None
 
 
-def test_process_skips_blocked_meta_tree(docs_root):
+def test_digest_skips_blocked_meta_tree(docs_root):
     blocked_dir = docs_root / "Inbox" / "bundle"
     blocked_dir.mkdir(parents=True, exist_ok=True)
     (blocked_dir / ".meta").write_text("marker", encoding="utf-8")
@@ -57,14 +57,14 @@ def test_process_skips_blocked_meta_tree(docs_root):
     p.write_text("hi", encoding="utf-8")
 
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
-        result = process_file(p)
+        result = digest_file(p)
 
     assert result.error == "blocked_by_meta_file"
     assert result.metadata_target == "skipped"
     assert get_by_file(p) is None
 
 
-def test_process_pdf_writes_row_only(docs_root):
+def test_digest_pdf_writes_row_only(docs_root):
     """PDFs (like every other format) get a metadata row, never native metadata in the file."""
     import pikepdf
     p = docs_root / "Inbox" / "doc.pdf"
@@ -77,7 +77,7 @@ def test_process_pdf_writes_row_only(docs_root):
             doc.text = "fake text"
             return doc, OcrBlock(decision="ocr_full")
         ocr.side_effect = passthrough
-        result = process_file(p)
+        result = digest_file(p)
     assert result.error is None
     assert result.metadata_target == "db"
     assert result.doc_id is not None

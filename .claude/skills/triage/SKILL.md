@@ -1,6 +1,6 @@
 ---
 name: triage
-description: File documents from <documents_root>/<inbox_dir> into <documents_root>/<Category>[/<Subcategory>]/<smart-name> using project-local memory of preferences, taxonomy, and prior corrections. Auto-applies high-confidence decisions and asks the user for ambiguous ones.
+description: File documents from <docs>/<inbox> into <docs>/<Category>[/<Subcategory>]/<smart-name> using project-local memory of preferences, taxonomy, and prior corrections. Auto-applies high-confidence decisions and asks the user for ambiguous ones.
 user-invocable: true
 allowed-tools: Read, Write, Edit, Bash, Grep, AskUserQuestion
 ---
@@ -30,7 +30,7 @@ multi-match cases will prompt interactively.
 
 ## Build the queue
 
-Files in `<INBOX_DIR>` (read directly) AND files flagged in the scan worklist
+Files in `<inbox>` (read directly) AND files flagged in the scan worklist
 as `files_needing_metadata`, `files_with_partial_metadata`, or
 `files_with_stale_metadata`. Sort by oldest filesystem mtime first.
 
@@ -41,11 +41,11 @@ as `files_needing_metadata`, `files_with_partial_metadata`, or
    The DB is the only source of truth; every file the pipeline has
    touched has a row in `docs`.
 2. If the summary is present and ≥100 chars, use it.
-3. Otherwise run `dnd process <path>` to generate it.
+3. Otherwise run `dnd digest <path>` to generate it.
 4. If the summary is still empty/unusable, ask the user what the document is
    about via `AskUserQuestion`.
 
-`process` with no path scans the tree and processes everything that needs
+`digest` with no path scans the tree and digests everything that needs
 work. Each successful run sets the row's `digested` timestamp and `modified`
 field (the file's mtime at digest time). Subsequent runs skip files whose
 recorded `modified` covers the file's current mtime. Pass `--force` to redo

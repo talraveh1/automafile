@@ -15,6 +15,3 @@ __pycache__/
 .vscode/
 .idea/
 Thumbs.db
-
-# the full README + plan are not needed in the image
-plan.md

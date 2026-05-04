@@ -1,8 +1,10 @@
 """Single source of truth for runtime settings.
 
-Settings are loaded from ``config.jsonc`` at the repo root. Every key may be
-overridden by an environment variable of the same name in upper-case form
-(useful for tests); extraction caps use ``EXTRACTION_<KEY>``.
+Settings are loaded from ``config.jsonc`` at the repo root. Nested keys may be
+overridden by environment variables that concatenate the group name with the
+leaf key, joined by ``_`` and uppercased — e.g. ``watch.settle`` becomes
+``WATCH_SETTLE``, ``ocr.min_text_chars`` becomes ``OCR_MIN_TEXT_CHARS``,
+top-level keys use their own uppercase form (``DOCS``, ``INBOX``, ``LOG``).
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ CONFIG_FILE = REPO_ROOT / "config.jsonc"
 EXAMPLE_CONFIG_FILE = REPO_ROOT / "config.example.jsonc"
 
 
-# regex helpers for the JSONC stripper
 _STRING_RE = re.compile(r'"(?:\\.|[^"\\])*"')
 _LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 _BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -65,36 +66,44 @@ def _coerce(value: str, default: Any) -> Any:
     return value
 
 
-class ExtractionSettings(BaseModel):
-    """Caps for bounded document text extraction."""
+class WatchSettings(BaseModel):
+    settle: float = 2.0
+    polling: float = 5.0
+    model_config = {"frozen": True}
 
-    min_pages: int = 3
-    max_pages: int = 5
-    per_page_chars: int = 1500
-    target_chars: int = 6000
+
+class OcrSettings(BaseModel):
+    max_total_chars: int = 6000
+    min_text_chars: int = 100
+    min_page_chars: int = 50
+    sparse_page_ratio: float = 0.3
+    model_config = {"frozen": True}
+
+
+class OllamaSettings(BaseModel):
+    url: str = "http://localhost:11434"
+    model: str = "aya-expanse:8b"
+    model_config = {"frozen": True}
+
+
+class TesseractSettings(BaseModel):
+    langs: str = "heb+eng"
+    bin: str = ""
+    prefix: str = ""
+    model_config = {"frozen": True}
 
 
 class Settings(BaseModel):
     """Frozen runtime configuration."""
 
-    ollama_url: str = "http://localhost:11434"
-    ollama_model: str = "aya-expanse:8b"
+    docs: Path
+    inbox: str = "Inbox"
+    log: str = "INFO"
 
-    documents_root: Path
-    inbox_dir: str = "Inbox"
-
-    tesseract_langs: str = "heb+eng"
-    tesseract_bin: str = ""
-    tessdata_prefix: str = ""
-
-    watch_settle_seconds: float = 2.0
-    watch_polling_interval: float = 5.0
-    log_level: str = "INFO"
-
-    ocr_min_text_chars: int = 100
-    ocr_min_page_chars: int = 50
-    ocr_sparse_page_ratio: float = 0.3
-    extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
+    watch: WatchSettings = Field(default_factory=WatchSettings)
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
+    ollama: OllamaSettings = Field(default_factory=OllamaSettings)
+    tesseract: TesseractSettings = Field(default_factory=TesseractSettings)
 
     data_dir: Path
     db_path: Path
@@ -105,44 +114,47 @@ class Settings(BaseModel):
 
     @property
     def inbox_path(self) -> Path:
-        return self.documents_root / self.inbox_dir
+        return self.docs / self.inbox
 
 
-_DEFAULT_DOCUMENTS_ROOT = REPO_ROOT / "documents-root"
+_DEFAULT_DOCS = REPO_ROOT / "documents-root"
 
 
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    file_cfg = _load_config_file()
+_TOP_LEVEL_DEFAULTS: dict[str, Any] = {
+    "docs": str(_DEFAULT_DOCS),
+    "inbox": "Inbox",
+    "log": "INFO",
+    "data_dir": str(REPO_ROOT / "data"),
+    # empty = derive from data_dir
+    "db_path": "",
+    "logs_dir": "",
+}
 
-    fields: dict[str, Any] = {
-        "ollama_url": "http://localhost:11434",
-        "ollama_model": "aya-expanse:8b",
-        "documents_root": str(_DEFAULT_DOCUMENTS_ROOT),
-        "inbox_dir": "Inbox",
-        "tesseract_langs": "heb+eng",
-        "tesseract_bin": "",
-        "tessdata_prefix": "",
-        "watch_settle_seconds": 2.0,
-        "watch_polling_interval": 5.0,
-        "log_level": "INFO",
-        "ocr_min_text_chars": 100,
-        "ocr_min_page_chars": 50,
-        "ocr_sparse_page_ratio": 0.3,
-        "data_dir": str(REPO_ROOT / "data"),
-        # empty = derive from data_dir
-        "db_path": "",
-        "logs_dir": "",
-    }
-    extraction_fields: dict[str, Any] = {
-        "min_pages": 3,
-        "max_pages": 5,
-        "per_page_chars": 1500,
-        "target_chars": 6000,
-    }
+_SECTIONS: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
+    "watch": (WatchSettings, {"settle": 2.0, "polling": 5.0}),
+    "ocr": (
+        OcrSettings,
+        {
+            "max_total_chars": 6000,
+            "min_text_chars": 100,
+            "min_page_chars": 50,
+            "sparse_page_ratio": 0.3,
+        },
+    ),
+    "ollama": (
+        OllamaSettings,
+        {"url": "http://localhost:11434", "model": "aya-expanse:8b"},
+    ),
+    "tesseract": (
+        TesseractSettings,
+        {"langs": "heb+eng", "bin": "", "prefix": ""},
+    ),
+}
 
+
+def _resolve_top_level(file_cfg: dict[str, Any]) -> dict[str, Any]:
     resolved: dict[str, Any] = {}
-    for key, default in fields.items():
+    for key, default in _TOP_LEVEL_DEFAULTS.items():
         env_val = os.environ.get(key.upper())
         if env_val is not None and env_val != "":
             resolved[key] = _coerce(env_val, default)
@@ -150,39 +162,52 @@ def get_settings() -> Settings:
             resolved[key] = file_cfg[key]
         else:
             resolved[key] = default
+    return resolved
 
-    extraction_file_cfg = file_cfg.get("extraction") if isinstance(file_cfg.get("extraction"), dict) else {}
-    extraction_resolved: dict[str, Any] = {}
-    for key, default in extraction_fields.items():
-        env_val = os.environ.get(f"EXTRACTION_{key.upper()}")
+
+def _resolve_section(name: str, file_cfg: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    sub = file_cfg.get(name) if isinstance(file_cfg.get(name), dict) else {}
+    resolved: dict[str, Any] = {}
+    for key, default in defaults.items():
+        env_val = os.environ.get(f"{name.upper()}_{key.upper()}")
         if env_val is not None and env_val != "":
-            extraction_resolved[key] = _coerce(env_val, default)
-        elif key in extraction_file_cfg and extraction_file_cfg[key] not in (None, ""):
-            extraction_resolved[key] = extraction_file_cfg[key]
+            resolved[key] = _coerce(env_val, default)
+        elif key in sub and sub[key] not in (None, ""):
+            resolved[key] = sub[key]
         else:
-            extraction_resolved[key] = default
+            resolved[key] = default
+    return resolved
 
-    documents_root = Path(str(resolved.pop("documents_root"))).expanduser().resolve()
-    data_dir = Path(str(resolved.pop("data_dir"))).expanduser().resolve()
-    db_raw = resolved.pop("db_path")
-    logs_raw = resolved.pop("logs_dir")
-    db_resolved = Path(str(db_raw)).expanduser().resolve() if db_raw else data_dir / "dragndoc.db"
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    file_cfg = _load_config_file()
+    top = _resolve_top_level(file_cfg)
+
+    sections: dict[str, BaseModel] = {}
+    for name, (model, defaults) in _SECTIONS.items():
+        sections[name] = model(**_resolve_section(name, file_cfg, defaults))
+
+    docs = Path(str(top.pop("docs"))).expanduser().resolve()
+    data_dir = Path(str(top.pop("data_dir"))).expanduser().resolve()
+    db_raw = top.pop("db_path")
+    logs_raw = top.pop("logs_dir")
+    db_path = Path(str(db_raw)).expanduser().resolve() if db_raw else data_dir / "dragndoc.db"
     logs_dir = Path(str(logs_raw)).expanduser().resolve() if logs_raw else data_dir / "logs"
+
     return Settings(
-        documents_root=documents_root,
+        docs=docs,
         data_dir=data_dir,
-        db_path=db_resolved,
+        db_path=db_path,
         logs_dir=logs_dir,
-        extraction=ExtractionSettings(**extraction_resolved),
-        **resolved,
+        **sections,
+        **top,
     )
 
 
 def reset_settings() -> None:
     """Drop the cached settings; useful for tests."""
     get_settings.cache_clear()
-    # The DB bootstrap memo is keyed by absolute path; clear it so a fresh
-    # DATA_DIR (typical in tests) re-runs bootstrap against the new location.
     try:
         from dragndoc.db import reset_bootstrap_cache
         reset_bootstrap_cache()

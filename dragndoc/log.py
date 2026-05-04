@@ -18,7 +18,7 @@ def setup_logging(level: str | None = None) -> None:
         return
     settings = get_settings()
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
-    log_level = level or settings.log_level
+    log_level = level or settings.log
     handler_console = logging.StreamHandler(stream=sys.stderr)
     handler_console.setFormatter(
         logging.Formatter(

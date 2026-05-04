@@ -66,7 +66,7 @@ def test_pdf_fat_first_page_is_trimmed_but_min_pages_are_kept(tmp_path, monkeypa
     from dragndoc.extractors import pdf as pdf_ext
 
     monkeypatch.setattr(pdf_ext, "tesseract_available", lambda: False)
-    monkeypatch.setenv("EXTRACTION_TARGET_CHARS", "1500")
+    monkeypatch.setenv("OCR_MAX_TOTAL_CHARS", "1500")
     reset_settings()
     path = tmp_path / "fat.pdf"
     _write_text_pdf(path, ["alpha " * 2000, "second page", "third page", "fourth page"])

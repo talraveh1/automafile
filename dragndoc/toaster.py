@@ -11,6 +11,7 @@ events).
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,7 @@ from dragndoc.config import get_settings
 from dragndoc.events import fetch_since, latest_id
 from dragndoc.log import get_logger
 from dragndoc.notifier import Notifier
+from dragndoc.process import pid_alive, terminate_pid
 
 
 log = get_logger(__name__)
@@ -208,7 +210,7 @@ def _count_ready_for_triage() -> int:
     inbox = settings.inbox_path
     if not inbox.exists():
         return 0
-    inbox_rel = settings.inbox_dir.rstrip("/") + "/"
+    inbox_rel = settings.inbox.rstrip("/") + "/"
     try:
         with connect(readonly=True) as conn:
             row = conn.execute(
@@ -368,3 +370,126 @@ def run_toaster(poll_interval: float = POLL_INTERVAL_SECONDS, *, tray: bool = Tr
         _run_with_tray(poll_interval)
     else:
         _run_headless(poll_interval)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle: PID-file based start / stop / status
+# ---------------------------------------------------------------------------
+
+
+def pid_file() -> Path:
+    return get_settings().data_dir / "runtime" / "toaster.pid"
+
+
+def _write_pid(pid: int) -> None:
+    p = pid_file()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(f"{pid}\n", encoding="utf-8")
+
+
+def _read_pid() -> int | None:
+    try:
+        raw = pid_file().read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    try:
+        return int(raw) if raw else None
+    except ValueError:
+        return None
+
+
+def _clear_pid() -> None:
+    pid_file().unlink(missing_ok=True)
+
+
+def status_snapshot() -> dict[str, Any]:
+    pid = _read_pid()
+    running = pid is not None and pid_alive(pid)
+    return {
+        "state": "running" if running else "stopped",
+        "running": running,
+        "pid": pid if running else None,
+    }
+
+
+def start_foreground(*, tray: bool = True) -> int:
+    """Run the toaster in this process; write/clear the pid file around the loop."""
+    snapshot = status_snapshot()
+    if snapshot["running"]:
+        print(f"toaster already running (pid={snapshot['pid']})", file=sys.stderr)
+        return 1
+    _write_pid(os.getpid())
+    try:
+        run_toaster(tray=tray)
+    finally:
+        _clear_pid()
+    return 0
+
+
+def start_background(*, tray: bool = True) -> int:
+    """Spawn a detached pythonw process running ``dnd toaster start --fg``."""
+    snapshot = status_snapshot()
+    if snapshot["running"]:
+        print(f"toaster already running (pid={snapshot['pid']})")
+        return 0
+
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    launcher = pythonw if pythonw.exists() else Path(sys.executable)
+
+    args = [str(launcher), "-m", "dragndoc", "toaster", "start", "--fg"]
+    if not tray:
+        args.append("--no-tray")
+
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = (
+            subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+
+    proc = subprocess.Popen(
+        args,
+        creationflags=creationflags,
+        close_fds=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # wait for the child to write its pid; detect immediate failure.
+    # 10s leaves headroom for cold pythonw.exe startup + dragndoc imports.
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if proc.poll() is not None and proc.returncode != 0:
+            print(f"toaster failed to start (exit code {proc.returncode})", file=sys.stderr)
+            return 1
+        snapshot = status_snapshot()
+        if snapshot["running"]:
+            print(f"toaster started (pid={snapshot['pid']})")
+            return 0
+        time.sleep(0.1)
+    print("toaster start requested, but it didn't report ready before the timeout", file=sys.stderr)
+    return 1
+
+
+def stop_toaster(*, timeout: float = 10.0) -> int:
+    pid = _read_pid()
+    if pid is None or not pid_alive(pid):
+        _clear_pid()
+        print("toaster: not running")
+        return 0
+    # The child runs as a detached pythonw.exe with no console, so
+    # CTRL_BREAK can't reach it; terminate by handle instead.
+    try:
+        terminate_pid(pid)
+    except OSError as exc:
+        print(f"failed to signal toaster (pid={pid}): {exc}", file=sys.stderr)
+        return 1
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            _clear_pid()
+            print(f"toaster stopped (pid={pid})")
+            return 0
+        time.sleep(0.1)
+    print(f"toaster did not stop within {timeout:.0f}s (pid={pid})", file=sys.stderr)
+    return 1

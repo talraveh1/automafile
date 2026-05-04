@@ -47,23 +47,30 @@ meta_app = typer.Typer(
     context_settings=HELP_CONTEXT_SETTINGS,
     help="Inspect and edit document metadata rows.",
 )
+toaster_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+    help="Control the Windows toaster (run on the host).",
+)
 app.add_typer(watch_app, name="watch")
 app.add_typer(review_app, name="review")
 app.add_typer(meta_app, name="meta")
+app.add_typer(toaster_app, name="toaster")
 
 
-def _maybe_override_documents_root(documents_root: Path | None) -> None:
-    if documents_root is None:
+def _maybe_override_docs(docs: Path | None) -> None:
+    if docs is None:
         return
-    os.environ["DOCUMENTS_ROOT"] = str(documents_root.resolve())
+    os.environ["DOCS"] = str(docs.resolve())
     from dragndoc.config import reset_settings
 
     reset_settings()
 
 
-def _run_watch_foreground(documents_root: Path | None) -> None:
-    _maybe_override_documents_root(documents_root)
-    log.info("CLI: watch (documents_root=%s)", documents_root)
+def _run_watch_foreground(docs: Path | None) -> None:
+    _maybe_override_docs(docs)
+    log.info("CLI: watch (docs=%s)", docs)
     from dragndoc.watcher import run_watcher
 
     run_watcher()
@@ -80,7 +87,7 @@ def _request_watch_stop(*, wait: bool, timeout: float) -> None:
     typer.echo("watcher stop requested")
 
 
-def _request_watch_start(*, fg: bool, documents_root: Path | None, wait: bool, timeout: float) -> None:
+def _request_watch_start(*, fg: bool, docs: Path | None, wait: bool, timeout: float) -> None:
     from dragndoc.runtime import request_start, status_snapshot, wait_for_running
 
     if fg:
@@ -88,12 +95,12 @@ def _request_watch_start(*, fg: bool, documents_root: Path | None, wait: bool, t
         if bool(snapshot["running"]):
             typer.echo("supervised watcher is already running; stop it first or use the existing background watcher", err=True)
             raise typer.Exit(1)
-        log.info("CLI: watch start --fg (documents_root=%s)", documents_root)
-        _run_watch_foreground(documents_root)
+        log.info("CLI: watch start --fg (docs=%s)", docs)
+        _run_watch_foreground(docs)
         return
 
-    if documents_root is not None:
-        typer.echo("--documents-root is only supported with --fg", err=True)
+    if docs is not None:
+        typer.echo("--docs is only supported with --fg", err=True)
         raise typer.Exit(2)
 
     snapshot = status_snapshot()
@@ -154,12 +161,12 @@ def watch_supervise() -> None:
 @watch_app.command("start")
 def watch_start(
     fg: Annotated[bool, typer.Option("--fg", help="Run the watcher in the foreground instead of resuming the supervised background watcher.")] = False,
-    documents_root: Annotated[Optional[Path], typer.Option("--documents-root", help="Override DOCUMENTS_ROOT when using --fg.")] = None,
+    docs: Annotated[Optional[Path], typer.Option("--docs", help="Override DOCS when using --fg.")] = None,
     wait: Annotated[bool, typer.Option("--wait/--no-wait", help="Wait until the background watcher is running.")] = True,
     timeout: Annotated[float, typer.Option("--timeout", min=0.1, help="Max seconds to wait when --wait is set.")] = 10.0,
 ) -> None:
     """Start or resume the watcher."""
-    _request_watch_start(fg=fg, documents_root=documents_root, wait=wait, timeout=timeout)
+    _request_watch_start(fg=fg, docs=docs, wait=wait, timeout=timeout)
 
 
 @watch_app.command("stop")
@@ -183,27 +190,27 @@ def watch_status() -> None:
 
 
 @app.command()
-def process(
-    path: Annotated[Optional[Path], typer.Argument(help="A specific file to process. Omit to scan the whole tree and process anything that needs it.")] = None,
+def digest(
+    path: Annotated[Optional[Path], typer.Argument(help="A specific file to digest. Omit to scan the whole tree and digest anything that needs it.")] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run", help="Run extraction + LLM but write nothing.")] = False,
     force_ocr: Annotated[bool, typer.Option("--force-ocr", help="Force OCR even if not recommended.")] = False,
-    force: Annotated[bool, typer.Option("-f", "--force", help="Re-process even if the row's `digested` mark is at-or-after the file's mtime.")] = False,
-    stop_on_error: Annotated[bool, typer.Option("--stop-on-error", help="Stop at the first failure when processing many files.")] = False,
+    force: Annotated[bool, typer.Option("-f", "--force", help="Re-digest even if the row's `digested` mark is at-or-after the file's mtime.")] = False,
+    stop_on_error: Annotated[bool, typer.Option("--stop-on-error", help="Stop at the first failure when digesting many files.")] = False,
 ) -> None:
-    """Process a single file (when ``path`` is given) or scan the tree and process everything that needs it."""
+    """Digest a single file or scan the tree and digest everything that needs it."""
     from dragndoc.config import get_settings
-    from dragndoc.pipeline import format_result_line, process_file
+    from dragndoc.pipeline import digest_file, format_result_line
 
     settings = get_settings()
     if path is not None:
-        log.info("CLI: process %s (dry_run=%s force_ocr=%s)", path, dry_run, force_ocr)
-        result = process_file(path, dry_run=dry_run, force_ocr=force_ocr)
+        log.info("CLI: digest %s (dry_run=%s force_ocr=%s)", path, dry_run, force_ocr)
+        result = digest_file(path, dry_run=dry_run, force_ocr=force_ocr)
         typer.echo(format_result_line(result))
         if result.error:
             raise typer.Exit(1)
         return
 
-    _process_tree(settings, dry_run=dry_run, force_ocr=force_ocr, force=force, stop_on_error=stop_on_error)
+    _digest_tree(settings, dry_run=dry_run, force_ocr=force_ocr, force=force, stop_on_error=stop_on_error)
 
 
 def _is_digested_fresh(rel: str, file_path: Path) -> bool:
@@ -229,11 +236,11 @@ def _is_digested_fresh(rel: str, file_path: Path) -> bool:
     return file_mt <= recorded_mt
 
 
-def _process_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_on_error: bool) -> None:
-    from dragndoc.pipeline import format_result_line, process_file
+def _digest_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_on_error: bool) -> None:
+    from dragndoc.pipeline import digest_file, format_result_line
     from dragndoc.scanner import run_scan
 
-    log.info("CLI: process tree (dry_run=%s force_ocr=%s force=%s)", dry_run, force_ocr, force)
+    log.info("CLI: digest tree (dry_run=%s force_ocr=%s force=%s)", dry_run, force_ocr, force)
     wl = run_scan()
     candidates: list[str] = []
     seen: set[str] = set()
@@ -250,40 +257,40 @@ def _process_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop
                 candidates.append(rel)
 
     if not candidates:
-        typer.echo("nothing to process")
+        typer.echo("nothing to digest")
         return
 
     skipped = 0
     todo: list[str] = []
     for rel in candidates:
-        full = settings.documents_root / rel
+        full = settings.docs / rel
         if not force and _is_digested_fresh(rel, full):
             skipped += 1
             continue
         todo.append(rel)
 
     if not todo:
-        msg = "nothing to process"
+        msg = "nothing to digest"
         if skipped:
             msg += f" ({skipped} already-digested skipped; use --force to redo)"
         typer.echo(msg)
         return
 
-    msg = f"processing {len(todo)} file(s)"
+    msg = f"digesting {len(todo)} file(s)"
     if skipped:
         msg += f" ({skipped} already-digested skipped; use --force to redo)"
     typer.echo(msg)
 
     failures = 0
     for rel in todo:
-        full = settings.documents_root / rel
+        full = settings.docs / rel
         if not full.exists():
-            typer.echo(f"{rel} | MISSING under {settings.documents_root}")
+            typer.echo(f"{rel} | MISSING under {settings.docs}")
             failures += 1
             if stop_on_error:
                 raise typer.Exit(1)
             continue
-        result = process_file(full, dry_run=dry_run, force_ocr=force_ocr)
+        result = digest_file(full, dry_run=dry_run, force_ocr=force_ocr)
         typer.echo(format_result_line(result))
         if result.error:
             failures += 1
@@ -297,13 +304,13 @@ def _process_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop
 
 @app.command()
 def scan(
-    documents_root: Annotated[Optional[Path], typer.Option("--documents-root")] = None,
-    path: Annotated[Optional[Path], typer.Option("--path", help="Limit the scan to a relative subpath under DOCUMENTS_ROOT (e.g. 'Inbox').")] = None,
+    docs: Annotated[Optional[Path], typer.Option("--docs")] = None,
+    path: Annotated[Optional[Path], typer.Option("--path", help="Limit the scan to a relative subpath under DOCS (e.g. 'Inbox').")] = None,
     print_json: Annotated[bool, typer.Option("--json", help="Print the worklist as JSON.")] = False,
 ) -> None:
-    """Run the scanner; report what `process` would do. No files are written."""
-    if documents_root is not None:
-        os.environ["DOCUMENTS_ROOT"] = str(documents_root.resolve())
+    """Run the scanner; report what `digest` would do. No files are written."""
+    if docs is not None:
+        os.environ["DOCS"] = str(docs.resolve())
         from dragndoc.config import reset_settings
         reset_settings()
     log.info("CLI: scan (path=%s, json=%s)", path, print_json)
@@ -320,13 +327,13 @@ def scan(
         f"missing={len(wl.missing_files)} unprocessable={len(wl.unprocessable_files)}"
     )
     if wl.files_needing_metadata or wl.files_needing_ocr or wl.files_with_partial_metadata or wl.files_with_stale_metadata:
-        typer.echo("next: dnd process")
+        typer.echo("next: dnd digest")
 
 
 @app.command()
 def ocr(
     path: Annotated[Path, typer.Argument(help="The file to OCR.")],
-    langs: Annotated[Optional[str], typer.Option(help="Override TESSERACT_LANGS.")] = None,
+    langs: Annotated[Optional[str], typer.Option(help="Override tesseract.langs.")] = None,
 ) -> None:
     """Force OCR on a single file and print the recovered text."""
     log.info("CLI: ocr %s (langs=%s)", path, langs)
@@ -359,7 +366,7 @@ def review_ocr(
 
     for entry in wl.ocr_review_candidates:
         rel = entry["relative_path"]
-        full = settings.documents_root / rel
+        full = settings.docs / rel
         typer.echo(f"\nCandidate: {rel}")
         typer.echo(f"  previous: {entry.get('previous_engine')} / {entry.get('previous_languages')}")
         typer.echo(f"  current : {entry.get('current_engine')} / {entry.get('current_languages')}")
@@ -374,7 +381,7 @@ def review_ocr(
                         done=utc_now_iso(),
                         engine="tesseract",
                         engine_ver=tesseract_version(),
-                        langs=[s.strip() for s in settings.tesseract_langs.replace("+", ",").split(",") if s.strip()],
+                        langs=[s.strip() for s in settings.tesseract.langs.replace("+", ",").split(",") if s.strip()],
                     )
                     upsert(doc)
                 typer.echo("  re-OCR'd.")
@@ -435,7 +442,7 @@ _META_FRONTMATTER_FIELDS = {
 
 @meta_app.command("get")
 def meta_get(
-    path: Annotated[Path, typer.Argument(help="File path. Looks up the row by relative path under documents_root.")],
+    path: Annotated[Path, typer.Argument(help="File path. Looks up the row by relative path under the docs root.")],
 ) -> None:
     """JSON dump of one row (was `inspect`)."""
     from dragndoc.meta_store import get_by_file
@@ -579,7 +586,7 @@ def grep(
     field: Annotated[Optional[str], typer.Option("--field", help=f"Restrict to one column: {', '.join(_FTS_FIELDS)}.")] = None,
     limit: Annotated[int, typer.Option("--limit", help="Max rows to return.")] = 50,
 ) -> None:
-    """Search metadata with FTS5. Boolean operators (AND/OR/NOT/NEAR), phrase quotes, and column scoping all work."""
+    """Search metadata with FTS5."""
     from dragndoc.db import connect
 
     if field is not None and field not in _FTS_FIELDS:
@@ -778,10 +785,10 @@ def doctor() -> None:
     from dragndoc.ocr import tesseract_available, tesseract_languages, tesseract_version
 
     settings = get_settings()
-    typer.echo(f"Documents root: {settings.documents_root}{'  (exists)' if settings.documents_root.exists() else '  (missing)'}")
+    typer.echo(f"Docs root: {settings.docs}{'  (exists)' if settings.docs.exists() else '  (missing)'}")
     typer.echo(f"  inbox: {settings.inbox_path}{'  (exists)' if settings.inbox_path.exists() else '  (missing)'}")
-    typer.echo(f"Data dir      : {settings.data_dir}{'  (exists)' if settings.data_dir.exists() else '  (missing)'}")
-    typer.echo(f"  db          : {settings.db_path}{'  (exists)' if settings.db_path.exists() else '  (missing)'}")
+    typer.echo(f"Data dir : {settings.data_dir}{'  (exists)' if settings.data_dir.exists() else '  (missing)'}")
+    typer.echo(f"  db     : {settings.db_path}{'  (exists)' if settings.db_path.exists() else '  (missing)'}")
 
     tess = tesseract_available()
     typer.echo(f"Tesseract present: {tess}")
@@ -790,19 +797,74 @@ def doctor() -> None:
         typer.echo(f"  langs    : {', '.join(tesseract_languages()) or '(unknown)'}")
 
     available = ollama_available()
-    typer.echo(f"Ollama reachable : {available}  ({settings.ollama_url})")
+    typer.echo(f"Ollama reachable : {available}  ({settings.ollama.url})")
     if available:
-        typer.echo(f"  model present : {ollama_has_model()}  ({settings.ollama_model})")
+        typer.echo(f"  model present : {ollama_has_model()}  ({settings.ollama.model})")
 
 
-@app.command()
-def toaster(
+@toaster_app.command("start")
+def toaster_start(
+    fg: Annotated[bool, typer.Option("--fg", help="Run the toaster in this process instead of spawning a detached one.")] = False,
     no_tray: Annotated[bool, typer.Option("--no-tray", help="Run headless (no tray icon). For debugging or pipes.")] = False,
 ) -> None:
-    """Poll the events table and fire Windows toasts. Run on the host."""
-    log.info("CLI: toaster (no_tray=%s)", no_tray)
-    from dragndoc.toaster import run_toaster
-    run_toaster(tray=not no_tray)
+    """Start the toaster (background by default; ``--fg`` to run in this terminal)."""
+    log.info("CLI: toaster start (fg=%s no_tray=%s)", fg, no_tray)
+    from dragndoc.toaster import start_background, start_foreground
+
+    if fg:
+        raise typer.Exit(start_foreground(tray=not no_tray))
+    raise typer.Exit(start_background(tray=not no_tray))
+
+
+@toaster_app.command("stop")
+def toaster_stop(
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1, help="Max seconds to wait for the toaster to exit.")] = 10.0,
+) -> None:
+    """Stop the running toaster."""
+    log.info("CLI: toaster stop (timeout=%s)", timeout)
+    from dragndoc.toaster import stop_toaster
+    raise typer.Exit(stop_toaster(timeout=timeout))
+
+
+@toaster_app.command("status")
+def toaster_status() -> None:
+    """Show whether the toaster is running, plus install state (shortcut + AUMID)."""
+    log.info("CLI: toaster status")
+    from dragndoc.toaster import status_snapshot
+
+    snapshot = status_snapshot()
+    state = snapshot["state"]
+    pid = snapshot["pid"]
+    if pid is None:
+        typer.echo(f"toaster: {state}")
+    else:
+        typer.echo(f"toaster: {state} (pid={pid})")
+
+    if sys.platform == "win32":
+        from dragndoc.toaster_setup import status as setup_status
+        setup_status()
+
+
+@toaster_app.command("install")
+def toaster_install() -> None:
+    """Install the Windows Startup shortcut + register the AUMID."""
+    if sys.platform != "win32":
+        typer.echo("install is Windows-only", err=True)
+        raise typer.Exit(2)
+    log.info("CLI: toaster install")
+    from dragndoc.toaster_setup import install
+    raise typer.Exit(install())
+
+
+@toaster_app.command("uninstall")
+def toaster_uninstall() -> None:
+    """Remove the Windows Startup shortcut + unregister the AUMID."""
+    if sys.platform != "win32":
+        typer.echo("uninstall is Windows-only", err=True)
+        raise typer.Exit(2)
+    log.info("CLI: toaster uninstall")
+    from dragndoc.toaster_setup import uninstall
+    raise typer.Exit(uninstall())
 
 
 def main() -> None:  # pragma: no cover

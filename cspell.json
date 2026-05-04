@@ -9,13 +9,10 @@
     "**/*.pyc",
     "*.egg-info/**",
     ".pytest_cache/**",
-    "storage/**",
+    "data/**",
     "memory/**",
-    "documents-root/**",
-    ".env",
-    ".env.example",
+    "build/**",
     "cspell.json",
-    "package-lock.json",
     "uv.lock",
     "poetry.lock"
   ],
@@ -93,7 +90,11 @@
     "weirdext",
     "worklist",
     "worklists",
-    "treewalk"
+    "treewalk",
+    "olefile",
+    "pystray",
+    "distutils",
+    "Sandboxed"
   ],
   "languageSettings": [
     {

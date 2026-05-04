@@ -8,6 +8,7 @@ FROM python:3.12-slim
 #   poppler-utils           — pdf2image (PDF rasterization for OCR)
 #   libmagic1               — python-magic (MIME sniffing for unknown extensions)
 #   git                     — for working with the bind-mounted workspace repo
+#   procps                  — ps/top/kill/pgrep for inspecting running processes
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
@@ -18,6 +19,7 @@ RUN apt-get update \
         git \
         curl \
         ca-certificates \
+        procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -60,7 +62,7 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 # the docs root and Ollama URL are container-local; the host's config.jsonc
 # and host paths are unaffected
-ENV DOCUMENTS_ROOT=/docs \
+ENV DOCS=/docs \
     OLLAMA_URL=http://host.docker.internal:11434
 
 CMD ["python", "-m", "dragndoc", "watch"]

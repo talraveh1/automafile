@@ -49,10 +49,10 @@ flowchart LR
 
 ## Data flow
 
-1. A file lands in `<documents_root>/<inbox_dir>`.
-2. `watcher` debounces creation/move events for `watch_settle_seconds`,
-   verifies size stability, then dispatches to `pipeline.process_file`.
-3. `pipeline.process_file` calls `dispatch.extract` to choose an extractor by
+1. A file lands in `<docs>/<inbox>`.
+2. `watcher` debounces creation/move events for `watch.settle` seconds,
+   verifies size stability, then dispatches to `pipeline.digest_file`.
+3. `pipeline.digest_file` calls `dispatch.extract` to choose an extractor by
    suffix (or MIME, via `python-magic`).
 4. The extractor returns an `ExtractedDoc` containing text and an OCR
    recommendation.
@@ -101,7 +101,7 @@ read-only).
 ## Scanner
 
 `dnd scan` walks the tree and produces an in-memory `Worklist`
-describing what `process` would do:
+describing what `digest` would do:
 
 - `files_needing_ocr` — text-layer-less PDFs, images without a row.
 - `files_needing_metadata` — supported types with no `docs` row.
@@ -128,7 +128,7 @@ The pipeline is deployable two ways without code changes:
 
 - **Native venv** on Windows (host). Direct OS access; the watcher and
   toaster run as separate foreground processes.
-- **Linux container** (Docker / Podman). Bind-mounts `<documents_root>`
+- **Linux container** (Docker / Podman). Bind-mounts `<docs>`
   to `/docs` and the project's `data/` directory through the workspace
   mount. Reaches the host's Ollama via `host.docker.internal:11434`. The
   toaster always runs on the host regardless of mode — it polls

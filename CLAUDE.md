@@ -12,8 +12,8 @@ overrides a `/triage` proposal.
 
 ## Architecture
 
-Files live in the user's filesystem under `<documents_root>/<inbox_dir>`
-(drop zone) and `<documents_root>/<Category>[/<Subcategory>]/<smart-name>.<ext>`
+Files live in the user's filesystem under `<docs>/<inbox>`
+(drop zone) and `<docs>/<Category>[/<Subcategory>]/<smart-name>.<ext>`
 (filed). The Python package (under `dragndoc/`) extracts text, runs
 OCR when needed, calls Ollama for enrichment, and writes metadata to
 **`data/dragndoc.db`** — a single SQLite file, never on OneDrive. Every
@@ -29,7 +29,7 @@ updated to follow the file. Read metadata with `dnd meta get <path>`
 The project runs either natively (a venv on the host, via
 `scripts/install.py`) or containerized (Docker / Podman, via the included
 `Dockerfile` + `compose.yml`). Both share the same package; container mode
-bind-mounts the documents folder to `/docs`, sets `DOCUMENTS_ROOT=/docs`,
+bind-mounts the documents folder to `/docs`, sets `DOCS=/docs`,
 and reaches host Ollama via `host.docker.internal`. Toasts are decoupled
 from the pipeline: pipeline writes rows to the `events` table in the
 same DB, and a separate `dnd toaster` process (always run on the host)

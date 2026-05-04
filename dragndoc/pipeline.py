@@ -1,4 +1,4 @@
-"""End-to-end per-file processing: extract → enrich → upsert metadata row."""
+"""End-to-end per-file digest: extract → enrich → upsert metadata row."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ log = get_logger(__name__)
 
 
 @dataclass
-class ProcessResult:
+class DigestResult:
     path: Path
     ocr_decision: str = "no_ocr"
     llm_tier: str = "skipped"
@@ -59,7 +59,7 @@ def _ocr_info_for(doc: ExtractedDoc) -> OcrInfo:
         done=utc_now_iso(),
         engine="tesseract",
         engine_ver=tesseract_version(),
-        langs=[s.strip() for s in settings.tesseract_langs.replace("+", ",").split(",") if s.strip()],
+        langs=[s.strip() for s in settings.tesseract.langs.replace("+", ",").split(",") if s.strip()],
     )
 
 
@@ -73,7 +73,7 @@ def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedD
         return doc, OcrInfo(decision="ocr_unavailable")
     pages = decision.pages if decision.action == "ocr_pages" else None
     try:
-        text = run_ocr(doc.path, langs=settings.tesseract_langs, pages=pages)
+        text = run_ocr(doc.path, langs=settings.tesseract.langs, pages=pages)
     except Exception as exc:  # noqa: BLE001
         log.error("OCR failed for %s: %s", doc.path, exc)
         return doc, OcrInfo(decision="ocr_failed")
@@ -90,7 +90,7 @@ def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedD
         done=utc_now_iso(),
         engine="tesseract",
         engine_ver=tesseract_version(),
-        langs=[s.strip() for s in settings.tesseract_langs.replace("+", ",").split(",") if s.strip()],
+        langs=[s.strip() for s in settings.tesseract.langs.replace("+", ",").split(",") if s.strip()],
     )
     return doc, info
 
@@ -111,19 +111,19 @@ def _hints_for(doc: ExtractedDoc) -> dict:
     return hints
 
 
-def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -> ProcessResult:
+def digest_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -> DigestResult:
     started = time.perf_counter()
     settings = get_settings()
-    result = ProcessResult(path=path)
-    log.info("processing %s%s", path, " (dry-run)" if dry_run else "")
+    result = DigestResult(path=path)
+    log.info("digesting %s%s", path, " (dry-run)" if dry_run else "")
 
     if not path.exists() or not path.is_file():
         result.error = "missing_or_not_file"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
-        log.error("cannot process %s: %s", path, result.error)
+        log.error("cannot digest %s: %s", path, result.error)
         return result
 
-    if is_in_blocked_subtree(path, stop_at=settings.documents_root):
+    if is_in_blocked_subtree(path, stop_at=settings.docs):
         result.error = "blocked_by_meta_file"
         result.metadata_target = "skipped"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
@@ -162,7 +162,7 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         result.metadata_target = "dry_run"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         log.info(
-            "processed %s | ocr=%s tier=%s category=%s target=dry_run | %dms",
+            "digested %s | ocr=%s tier=%s category=%s target=dry_run | %dms",
             path, result.ocr_decision, result.llm_tier, result.category, result.duration_ms,
         )
         return result
@@ -180,14 +180,14 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
 
     result.duration_ms = int((time.perf_counter() - started) * 1000)
     log.info(
-        "processed %s | ocr=%s tier=%s category=%s target=%s id=%s | %dms",
+        "digested %s | ocr=%s tier=%s category=%s target=%s id=%s | %dms",
         path, result.ocr_decision, result.llm_tier, result.category,
         result.metadata_target, result.doc_id, result.duration_ms,
     )
     return result
 
 
-def format_result_line(result: ProcessResult) -> str:
+def format_result_line(result: DigestResult) -> str:
     rel = result.path.name
     return (
         f"{rel} | ocr={result.ocr_decision} | tier={result.llm_tier} "

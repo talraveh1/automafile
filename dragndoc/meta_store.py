@@ -164,13 +164,13 @@ def _parse_json(s: str | None) -> dict[str, Any]:
 
 
 def relative_to_root(file_path: Path) -> str:
-    """Return ``file_path`` as a forward-slash relative path under documents_root.
+    """Return ``file_path`` as a forward-slash relative path under the docs root.
 
     Falls back to the absolute path string if the file lives outside the root.
     """
     settings = get_settings()
     try:
-        return str(file_path.resolve().relative_to(settings.documents_root.resolve())).replace("\\", "/")
+        return str(file_path.resolve().relative_to(settings.docs.resolve())).replace("\\", "/")
     except ValueError:
         return str(file_path).replace("\\", "/")
 

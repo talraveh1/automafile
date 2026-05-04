@@ -21,7 +21,7 @@ log = get_logger(__name__)
 _DEBOUNCE_SECONDS = 5.0
 
 # AUMID = Application User Model ID. Must match the value registered by
-# ``scripts/toaster.py`` under HKCU\Software\Classes\AppUserModelId\<AUMID>.
+# ``dnd toaster install`` under HKCU\Software\Classes\AppUserModelId\<AUMID>.
 # Windows uses it to attribute toasts and look up the display name.
 AUMID = "DragnDoc.Toaster"
 AUMID_REG_PATH = rf"Software\Classes\AppUserModelId\{AUMID}"
@@ -53,7 +53,7 @@ class Notifier:
         """Create a WindowsToaster bound to our registered AUMID.
 
         The AUMID must be registered in the registry (done by
-        ``scripts/toaster.py``); without it Windows accepts every toast
+        ``dnd toaster install``); without it Windows accepts every toast
         but silently drops them. We don't auto-register here because that
         belongs in the install flow, not at every toaster startup."""
         try:

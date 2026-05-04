@@ -136,7 +136,7 @@ def _build_prompt(doc: ExtractedDoc, hints: dict, taxonomy: str) -> str:
 def _ollama_generate(prompt: str, *, extra_options: dict | None = None) -> str:
     import time as _time
     settings = get_settings()
-    url = settings.ollama_url.rstrip("/") + "/api/generate"
+    url = settings.ollama.url.rstrip("/") + "/api/generate"
     options = {
         "temperature": 0.1,
         "num_ctx": 8192,
@@ -145,13 +145,13 @@ def _ollama_generate(prompt: str, *, extra_options: dict | None = None) -> str:
     if extra_options:
         options.update(extra_options)
     body = {
-        "model": settings.ollama_model,
+        "model": settings.ollama.model,
         "prompt": prompt,
         "stream": False,
         "format": "json",
         "options": options,
     }
-    log.debug("ollama POST %s model=%s prompt=%dchars", url, settings.ollama_model, len(prompt))
+    log.debug("ollama POST %s model=%s prompt=%dchars", url, settings.ollama.model, len(prompt))
     started = _time.perf_counter()
     resp = requests.post(url, json=body, timeout=300)
     resp.raise_for_status()
@@ -340,7 +340,7 @@ def enrich(doc: ExtractedDoc, hints: dict | None = None) -> EnrichmentResult:
 def ollama_available() -> bool:
     settings = get_settings()
     try:
-        resp = requests.get(settings.ollama_url.rstrip("/") + "/api/tags", timeout=5)
+        resp = requests.get(settings.ollama.url.rstrip("/") + "/api/tags", timeout=5)
         return resp.status_code == 200
     except Exception:
         return False
@@ -349,10 +349,10 @@ def ollama_available() -> bool:
 def ollama_has_model() -> bool:
     settings = get_settings()
     try:
-        resp = requests.get(settings.ollama_url.rstrip("/") + "/api/tags", timeout=5)
+        resp = requests.get(settings.ollama.url.rstrip("/") + "/api/tags", timeout=5)
         if resp.status_code != 200:
             return False
         models = [m.get("name", "") for m in resp.json().get("models", [])]
-        return any(m.startswith(settings.ollama_model.split(":", 1)[0]) for m in models)
+        return any(m.startswith(settings.ollama.model.split(":", 1)[0]) for m in models)
     except Exception:
         return False

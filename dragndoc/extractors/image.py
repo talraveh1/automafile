@@ -110,7 +110,7 @@ def extract(path: Path) -> ExtractedDoc:
                         ocr_unavailable = True
                     else:
                         try:
-                            frame_text = ocr_image(im.copy(), langs=settings.tesseract_langs)
+                            frame_text = ocr_image(im.copy(), langs=settings.tesseract.langs)
                             ocr_pages.append(frame_index)
                         except Exception as exc:  # noqa: BLE001
                             ocr_failed = True

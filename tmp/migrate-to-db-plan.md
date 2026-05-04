@@ -40,7 +40,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE docs (
     id          INTEGER PRIMARY KEY,
-    path        TEXT NOT NULL UNIQUE,            -- relative to documents_root, /-separated
+    path        TEXT NOT NULL UNIQUE,            -- relative to docs, /-separated
     hash        TEXT NOT NULL,                   -- sha256 of file bytes
     size        INTEGER NOT NULL,
     modified    TEXT,                            -- file's mtime at time of last digest (ISO 8601 UTC)

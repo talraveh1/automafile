@@ -1,6 +1,6 @@
 """Tree walker; emits an in-memory worklist describing what needs OCR / metadata / review.
 
-The scanner no longer writes JSON to disk. Callers (``dnd process``,
+The scanner no longer writes JSON to disk. Callers (``dnd digest``,
 ``dnd review``) consume the returned :class:`Worklist` directly.
 """
 
@@ -41,7 +41,7 @@ REQUIRED_METADATA_FIELDS = ("category", "summary", "tags")
 @dataclass
 class Worklist:
     ran_at: str
-    documents_root: str
+    docs: str
     tree_size: int = 0
     files_seen: int = 0
     skipped: int = 0
@@ -56,7 +56,7 @@ class Worklist:
     def to_dict(self) -> dict[str, Any]:
         return {
             "ran_at": self.ran_at,
-            "documents_root": self.documents_root,
+            "docs": self.docs,
             "tree_size": self.tree_size,
             "files_seen": self.files_seen,
             "skipped": self.skipped,
@@ -144,9 +144,9 @@ def _normalize_langs(value: str) -> tuple[str, ...]:
     return tuple(sorted(set(parts)))
 
 
-def run_scan(documents_root: Path | None = None, subpath: Path | None = None) -> Worklist:
+def run_scan(docs: Path | None = None, subpath: Path | None = None) -> Worklist:
     settings = get_settings()
-    root = documents_root or settings.documents_root
+    root = docs or settings.docs
     if not root.exists():
         root.mkdir(parents=True, exist_ok=True)
 
@@ -155,16 +155,16 @@ def run_scan(documents_root: Path | None = None, subpath: Path | None = None) ->
             raise ValueError(f"subpath must be relative: {subpath}")
         walk_root = (root / subpath).resolve()
         if not walk_root.is_relative_to(root.resolve()):
-            raise ValueError(f"subpath escapes documents_root: {subpath}")
+            raise ValueError(f"subpath escapes docs root: {subpath}")
         if not walk_root.exists():
             raise FileNotFoundError(f"subpath does not exist: {walk_root}")
     else:
         walk_root = root
 
     log.info("scan starting under %s", walk_root)
-    wl = Worklist(ran_at=_utc_now_iso(), documents_root=str(root))
+    wl = Worklist(ran_at=_utc_now_iso(), docs=str(root))
     current_engine = tesseract_version()
-    current_langs = settings.tesseract_langs
+    current_langs = settings.tesseract.langs
     rows_by_path = _index_existing_rows()
 
     current_directory: Path | None = None

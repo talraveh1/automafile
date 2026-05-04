@@ -12,7 +12,7 @@ from watchdog.observers.polling import PollingObserver
 from dragndoc.config import get_settings
 from dragndoc.log import get_logger
 from dragndoc.events import append as append_event
-from dragndoc.pipeline import format_result_line, process_file
+from dragndoc.pipeline import digest_file, format_result_line
 from dragndoc.treewalk import BLOCK_MARKER_FILENAME, is_in_blocked_subtree
 
 
@@ -46,7 +46,7 @@ class _InboxHandler(FileSystemEventHandler):
         settings = get_settings()
         if path.name == BLOCK_MARKER_FILENAME:
             return
-        if is_in_blocked_subtree(path, stop_at=settings.documents_root):
+        if is_in_blocked_subtree(path, stop_at=settings.docs):
             log.info("Skipping new file under blocked subtree: %s", path)
             return
         if path.suffix.lower() in {".tmp", ".part", ".crdownload"}:
@@ -59,8 +59,8 @@ class _InboxHandler(FileSystemEventHandler):
             self._wait_for_settle(path)
             if not path.exists():
                 return
-            log.info("Processing new file: %s", path)
-            result = process_file(path)
+            log.info("Digesting new file: %s", path)
+            result = digest_file(path)
             log.info(format_result_line(result))
             if not result.error:
                 append_event(
@@ -78,7 +78,7 @@ class _InboxHandler(FileSystemEventHandler):
     @staticmethod
     def _wait_for_settle(path: Path) -> None:
         settings = get_settings()
-        time.sleep(settings.watch_settle_seconds)
+        time.sleep(settings.watch.settle)
         last_size = -1
         for _ in range(10):
             try:
@@ -98,10 +98,10 @@ def run_watcher() -> None:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
 
     handler = _InboxHandler()
-    observer = PollingObserver(timeout=settings.watch_polling_interval)
+    observer = PollingObserver(timeout=settings.watch.polling)
     observer.schedule(handler, str(settings.inbox_path), recursive=True)
     observer.start()
-    log.info("Watching %s (polling every %.1fs)", settings.inbox_path, settings.watch_polling_interval)
+    log.info("Watching %s (polling every %.1fs)", settings.inbox_path, settings.watch.polling)
     print(f"[dragndoc] Watching {settings.inbox_path}; Ctrl-C to stop.")
     try:
         while True:

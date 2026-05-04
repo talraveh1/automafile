@@ -10,9 +10,9 @@ services:
     restart: unless-stopped
 
     environment:
-      DOCUMENTS_ROOT: /docs
+      DOCS: /docs
       OLLAMA_URL: http://host.docker.internal:11434
-      LOG_LEVEL: INFO
+      LOG: INFO
 
     volumes:
       # the project workspace — code lives on the host, runs in the container
@@ -37,7 +37,7 @@ services:
       - "host.docker.internal:host-gateway"
 
     working_dir: /workspace
-    command: ["dnd", "supervise"]
+    command: ["dnd", "watch", "supervise"]
 
 volumes:
   dragndoc-venv:

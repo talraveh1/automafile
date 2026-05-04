@@ -74,8 +74,8 @@ def test_watch_start_help_supports_dash_h():
     assert "--fg" in res.output
 
 
-def test_process_help_supports_dash_h():
-    res = runner.invoke(app, ["process", "-h"])
+def test_digest_help_supports_dash_h():
+    res = runner.invoke(app, ["digest", "-h"])
     assert res.exit_code == 0, res.output
     assert "--dry-run" in res.output
 

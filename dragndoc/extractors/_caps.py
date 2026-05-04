@@ -19,13 +19,7 @@ class CapConfig:
 
     @classmethod
     def from_settings(cls, settings: "Settings") -> "CapConfig":
-        extraction = settings.extraction
-        return cls(
-            min_pages=extraction.min_pages,
-            max_pages=extraction.max_pages,
-            per_page_chars=extraction.per_page_chars,
-            target_chars=extraction.target_chars,
-        )
+        return cls(target_chars=settings.ocr.max_total_chars)
 
 
 def trim_to_word_boundary(text: str, max_chars: int) -> str:
