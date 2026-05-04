@@ -23,7 +23,7 @@ flowchart LR
    events[("<b>events.jsonl</b><br/><i>storage/</i>")]:::journal
    toaster["<b>Toaster</b><br/><i>host process<br/>cursor + compact</i>"]:::notify
 
-   cli["<b>Triage CLI</b><br/><i>inspect · mv · filer-apply<br/>scan · review-ocr · reconcile</i>"]:::tool
+   cli["<b>Triage CLI</b><br/><i>inspect · mv<br/>scan · review-ocr · reconcile</i>"]:::tool
    triage[/"🗂️ Triage skill"/]:::tool
 
    inbox --> watcher --> pipeline
@@ -141,6 +141,5 @@ writes back. All extracted/enriched metadata lives in
 - Sidecars sync with the documents through OneDrive (the `.meta/` folder
   rides along).
 - Moves must always travel the file *and* its sidecar. Use
-  `python -m dragndoc mv <src> <dst>` (or `filer-apply` for the
-  category-based path) — never raw `mv` / `move`.
+   `dnd mv <src> <dst>` — never raw `mv` / `move`.
 ```

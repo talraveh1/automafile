@@ -45,7 +45,11 @@ naming_convention: "{date} - {correspondent} - {topic}.{ext}"
 _TAXONOMY = """\
 # Taxonomy
 
-Top-level categories. Add or remove freely; `/triage` will respect the file as the source of truth.
+The source of truth for filing. Add or remove freely.
+
+Format: top-level bullets are categories; nested bullets are subcategories.
+After any name, an em-dash followed by text is treated as a description of
+the user's intent (use it whenever a name alone is ambiguous).
 
 - Financial
 - Legal
@@ -54,10 +58,6 @@ Top-level categories. Add or remove freely; `/triage` will respect the file as t
 - Personal
 - Media
 - Unknown
-
-## Subcategories
-
-(Empty by default. Add `Category/Subcategory` lines as the user's archive grows.)
 """
 
 

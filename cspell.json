@@ -9,7 +9,6 @@
     "**/*.pyc",
     "*.egg-info/**",
     ".pytest_cache/**",
-    ".serena/**",
     "storage/**",
     "memory/**",
     "documents-root/**",
@@ -93,7 +92,8 @@
     "venv",
     "weirdext",
     "worklist",
-    "worklists"
+    "worklists",
+    "treewalk"
   ],
   "languageSettings": [
     {

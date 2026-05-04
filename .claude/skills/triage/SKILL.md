@@ -16,16 +16,16 @@ written by the `dragndoc` Python pipeline. Don't try to reuse it elsewhere.
 1. Read [memory/preferences.md](../../../memory/preferences.md),
    [memory/taxonomy.md](../../../memory/taxonomy.md), and the last 50 lines of
    [memory/corrections.jsonl](../../../memory/corrections.jsonl).
-2. Use `Bash` to run `python -m dragndoc doctor` and confirm Tesseract +
+2. Use `Bash` to run `dnd doctor` and confirm Tesseract +
    Ollama are reachable. If either is missing, halt and explain.
 3. Look for the latest `storage/scan/scan-*.json`. If older than 24h or absent,
-   run `python -m dragndoc scan`.
+  run `dnd scan`.
 
 ## Drift / orphan review
 
 For each entry in `orphan_sidecars`, propose the hash-matched relocation if
 exactly one candidate is present. If multiple candidates, ask the user via
-`AskUserQuestion`. Apply chosen relinks via `python -m dragndoc reconcile
+`AskUserQuestion`. Apply chosen relinks via `dnd reconcile
 --yes-all` (single-match) or by editing the sidecar's `relative_path` field
 manually for multi-match cases.
 
@@ -48,17 +48,17 @@ as `files_needing_metadata`, `files_with_partial_metadata`, or
 
 ## For each document
 
-1. Read its sidecar metadata via `python -m dragndoc inspect <path>` —
+1. Read its sidecar metadata via `dnd inspect <path>` —
    prints JSON for the file (or for the whole inbox when called with no
    path). Sidecars are the only source of truth; every file the pipeline
    has touched has one.
 2. If the summary is present and ≥100 chars, use it.
-3. Otherwise run `python -m dragndoc process <path>` to generate it
+3. Otherwise run `dnd process <path>` to generate it
    in-place.
 4. If the summary is still empty/unusable, ask the user what the document is
    about via `AskUserQuestion`.
 
-`process` over a worklist (`python -m dragndoc process` with no path, or
+`process` over a worklist (`dnd process` with no path, or
 `process <scan-*.json>`) marks each successfully-processed entry with a
 ``processed`` ISO timestamp and rewrites the worklist atomically (flush +
 fsync + rename) after every file. Subsequent runs skip entries whose
@@ -90,21 +90,12 @@ Otherwise, ask the user via `AskUserQuestion`.
 
 ## Apply
 
-Two ways to perform the move, depending on how much logic you want the CLI
-to own:
-
-- **Category-based**: `python -m dragndoc filer-apply --path <path>
-  --category <c> [--subcategory <s>] --name <smart>` — composes the target
-  path under `<documents_root>/<category>[/<subcategory>]/<name>`,
-  refreshes sidecar fields (`category`, `subcategory`, `filed_at`,
-  `filed_path`, `metadata_modified`) after the move.
-- **Direct**: `python -m dragndoc mv <src> <dst> [-f]` — moves the file
-  and its sidecar together. Fails if either target exists, unless `-f`.
-  Use this for ad-hoc relocations where you've already computed the
-  destination path.
+Compute the destination path from the chosen category, optional subcategory,
+and smart filename, then run `dnd mv <src> <dst> [-f]`. It moves the file and
+its sidecar together and fails if either target exists, unless `-f`.
 
 Never `mv` / `move` a file directly with the OS — the sidecar will be left
-behind. Always go through one of the above.
+behind. Always go through `dnd mv`.
 
 ## Cluster + propose new categories
 
@@ -126,7 +117,7 @@ After three similar corrections, propose a new rule for `preferences.md`.
 ## OCR review
 
 At the end of the session, walk `ocr_review_candidates` from the scan. For
-each: ask user; on yes, run `python -m dragndoc review-ocr --yes-all`
+each: ask user; on yes, run `dnd review-ocr --yes-all`
 scoped to that file (or invoke directly). On no, the same command bumps
 `metadata_modified` so the file doesn't reappear.
 

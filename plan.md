@@ -4,7 +4,7 @@
 
 The previous implementation built around Paperless-ngx is being retired. Paperless's "I own the files" model conflicts with the user's stated requirement: files must live in their own filesystem, be renameable/moveable outside any tool, and the metadata layer must be a helper, not a portal.
 
-The replacement is a thin Python pipeline that watches a folder, extracts text from each file (using OCR only when needed), asks a local Ollama LLM for tags + category + summary, and writes that information to a Markdown sidecar in a hidden `.meta/` subfolder next to the file. **Original documents are never modified** — the sidecar is always the only source of truth. A separate Claude Code skill named `/triage` decides where each file is filed (folder + smart filename), informed by project-local memory of the user's preferences and prior corrections. Moves go through `python -m dragndoc mv` (or `filer-apply`) so the sidecar always travels with the file.
+The replacement is a thin Python pipeline that watches a folder, extracts text from each file (using OCR only when needed), asks a local Ollama LLM for tags + category + summary, and writes that information to a Markdown sidecar in a hidden `.meta/` subfolder next to the file. **Original documents are never modified** — the sidecar is always the only source of truth. A separate Claude Code skill named `/triage` decides where each file is filed (folder + smart filename), informed by project-local memory of the user's preferences and prior corrections. Moves go through `dnd mv` so the sidecar always travels with the file.
 
 **This plan is for a new agent starting from a fresh empty directory.** Do not reuse anything from the existing `d:\dragndoc` repo — it has Docker, PowerShell, Paperless integration, and other obsolete leftovers. Reference it only to copy across the prompt template, the memory file shapes, and the `/triage` SKILL.md skeleton, all of which translate cleanly.
 
@@ -52,7 +52,7 @@ The replacement is a thin Python pipeline that watches a folder, extracts text f
 ├── CLAUDE.md                    # project-scoped Claude instructions
 ├── dragndoc/                  # the Python package
 │   ├── __init__.py
-│   ├── __main__.py              # enables `python -m dragndoc`
+│   ├── __main__.py              # keeps module invocation available; official CLI is `dnd`
 │   ├── cli.py                   # typer entry points
 │   ├── config.py                # .env loader, paths, defaults
 │   ├── log.py                   # logging setup, single source
@@ -94,7 +94,7 @@ The replacement is a thin Python pipeline that watches a folder, extracts text f
 │           └── SKILL.md
 ├── scripts/
 │   ├── install.ps1              # bootstrap helper
-│   └── run-watcher.ps1          # tiny wrapper around `python -m dragndoc watch`
+│   └── run-watcher.ps1          # tiny wrapper around `dnd watch start --fg`
 ├── storage/                     # gitignored, runtime
 │   ├── scan/                    # scan-<ts>.json, review-<ts>.json
 │   └── logs/
@@ -428,7 +428,7 @@ Typer app with these commands:
 | `dnd reconcile` | Walk orphan sidecars interactively; for each, propose hash-matched relocation. |
 | `dnd inspect [<path>]` | Read-only JSON dump of sidecar metadata. Default scope: walk the inbox. Used by `/triage`. |
 | `dnd mv <src> <dst> [-f]` | Move a file together with its sidecar. Fails if either target exists, unless `-f`. |
-| `dnd filer-apply` | Category-based move: composes `<documents_root>/<category>[/<sub>]/<name>` and refreshes sidecar fields after the move. |
+| `dnd mv` | Move a file together with its sidecar after Claude computes the final destination path. |
 | `dnd bootstrap` | Create memory templates, seed taxonomy if absent. |
 
 Every command takes `--documents-root` to override the env, and `--dry-run` where it makes sense.
@@ -453,7 +453,7 @@ Project-local memory lives in `memory/` (gitignored). When working on filing dec
 
 ## Architecture
 
-Files live in the user's filesystem under `<DOCUMENTS_ROOT>/<INBOX_DIR>` and `<DOCUMENTS_ROOT>/<MANAGED_DIR>`. The Python pipeline (under `dragndoc/`) extracts text, runs OCR when needed, calls Ollama for enrichment, and writes metadata to a `.meta/<filename>.md` sidecar — every file gets one. Original documents are never modified. The `/triage` skill decides where each file is filed; moves go through `dnd mv` (or `filer-apply`) so the sidecar always travels with the file.
+Files live in the user's filesystem under `<DOCUMENTS_ROOT>/<INBOX_DIR>` and `<DOCUMENTS_ROOT>/<MANAGED_DIR>`. The Python pipeline (under `dragndoc/`) extracts text, runs OCR when needed, calls Ollama for enrichment, and writes metadata to a `.meta/<filename>.md` sidecar — every file gets one. Original documents are never modified. The `/triage` skill decides where each file is filed; moves go through `dnd mv` so the sidecar always travels with the file.
 
 ## Skill scope
 
@@ -485,7 +485,7 @@ Workflow (mirrors the v1 skill in spirit; differences flagged):
    - If still empty/unusable → ask the user for guidance.
 5. **Decide** filing: `category`, optional `subcategory`, `smart_name`. Apply preferences-md rules and corrections.jsonl precedents.
 6. **Auto-apply gate** — same four conditions as v1: `confidence-high`, no review-needed, category exists in taxonomy, taxonomy unchanged since enrichment.
-7. **Apply** — call `dnd process` if needed to refresh the sidecar; then either `dnd filer-apply --path <path> --category <c> --subcategory <s> --name <smart>` for category-based filing, or `dnd mv <src> <dst>` for ad-hoc relocations. Both move the file and its sidecar together. Never use raw `mv`/`move`.
+7. **Apply** — call `dnd process` if needed to refresh the sidecar; then compute the final destination path and run `dnd mv <src> <dst>`. It moves the file and its sidecar together. Never use raw `mv`/`move`.
 8. **Cluster + propose new categories** — same threshold rule (≥3 docs, single docs never spawn).
 9. **Learn** — append corrections to `memory/corrections.jsonl`. Propose new `preferences.md` rules after 3 similar corrections.
 10. **OCR review** — at end of session, surface `ocr_review_candidates` from the scan; for each, ask user; on yes, run `dnd ocr`; on no, bump `metadata_modified` so it doesn't reappear.

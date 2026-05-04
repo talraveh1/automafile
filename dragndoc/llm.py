@@ -28,6 +28,7 @@ HEBREW_GERSHAYIM = "״"
 # ASCII printable range used by sanitizer
 ASCII_QUOTE = '"'
 
+_TAXONOMY_PATH_PARTS = ("memory", "taxonomy.md")
 _KNOWN_KEYS = ("title", "summary", "reason", "correspondent", "subcategory")
 # match ``"key":"value"`` where value ends at the closing quote that's followed by
 # either `,` + next-known-key, or `,` + `<line-break>` + next-known-key, or end of object.
@@ -82,32 +83,16 @@ def sanitize_excerpt(text: str) -> str:
     return HEBREW_QUOTE_RE.sub(HEBREW_GERSHAYIM, text)
 
 
-def _category_alias(category: str) -> str:
-    """Map raw model output to user's canonical taxonomy keys."""
-    if not category:
-        return "Unknown"
-    key = category.strip().lower()
-    aliases = {
-        "medical": "Personal",
-        "health": "Personal",
-        "healthcare": "Personal",
-        "finance": "Financial",
-        "financial": "Financial",
-        "legal": "Legal",
-        "law": "Legal",
-        "research": "Research",
-        "academic": "Research",
-        "teaching": "Teaching",
-        "education": "Teaching",
-        "personal": "Personal",
-        "family": "Personal",
-        "media": "Media",
-        "photo": "Media",
-        "photos": "Media",
-        "unknown": "Unknown",
-        "other": "Unknown",
-    }
-    return aliases.get(key, category.strip())
+def _load_taxonomy() -> str:
+    """Read the user's taxonomy markdown verbatim. Bootstrap is a prerequisite."""
+    settings = get_settings()
+    path = settings.repo_root.joinpath(*_TAXONOMY_PATH_PARTS)
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"taxonomy file missing at {path}; run `dnd bootstrap` first"
+        ) from exc
 
 
 def _section_header(section: Section, total_sections: int | None) -> str:
@@ -136,14 +121,13 @@ def _render_sections(sections: list[Section], total_sections: int | None) -> str
     return "\n\n".join(blocks)
 
 
-def _build_prompt(doc: ExtractedDoc, hints: dict, taxonomy: list[str]) -> str:
+def _build_prompt(doc: ExtractedDoc, hints: dict, taxonomy: str) -> str:
     template_path = Path(__file__).parent / "prompts" / "triage.txt"
     template = template_path.read_text(encoding="utf-8")
     safe_text = sanitize_excerpt(_render_sections(doc.sections, doc.total_sections))
     hints_text = "\n".join(f"- {k}: {v}" for k, v in (hints or {}).items()) or "(none)"
-    taxonomy_text = ", ".join(taxonomy) if taxonomy else "Financial, Legal, Research, Teaching, Personal, Media, Unknown"
     return (
-        template.replace("{taxonomy}", taxonomy_text)
+        template.replace("{taxonomy}", taxonomy)
         .replace("{hints}", hints_text)
         .replace("{text}", safe_text)
     )
@@ -261,7 +245,7 @@ def _coerce_to_result(parsed: dict, tier: str, raw: str) -> EnrichmentResult:
         title=_coerce_str_field(parsed.get("title")),
         summary=str(parsed.get("summary") or ""),
         tags=[str(t) for t in (parsed.get("tags") or []) if t],
-        category=_category_alias(str(parsed.get("category") or "Unknown")),
+        category=str(parsed.get("category") or "Unknown").strip() or "Unknown",
         subcategory=_coerce_str_field(parsed.get("subcategory")),
         correspondent=_coerce_str_field(parsed.get("correspondent")),
         date=parsed.get("date") or None,
@@ -336,10 +320,9 @@ def parse_with_tiers(raw: str, prompt_for_retry: str | None = None) -> Enrichmen
     return _placeholder_result(raw)
 
 
-def enrich(doc: ExtractedDoc, hints: dict | None = None, taxonomy: list[str] | None = None) -> EnrichmentResult:
+def enrich(doc: ExtractedDoc, hints: dict | None = None) -> EnrichmentResult:
     """Send text to Ollama, parse with tiered fallback, return enrichment."""
-    taxonomy = taxonomy or ["Financial", "Legal", "Research", "Teaching", "Personal", "Media", "Unknown"]
-    prompt = _build_prompt(doc, hints or {}, taxonomy)
+    prompt = _build_prompt(doc, hints or {}, _load_taxonomy())
     log.info("enrich: text=%dchars hints=%s", len(doc.text or ""), sorted((hints or {}).keys()) or "[]")
     try:
         raw = _ollama_generate(prompt)

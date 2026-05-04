@@ -33,5 +33,5 @@ def test_build_prompt_does_not_slice_rendered_text(tmp_path):
         sections=[Section(label=None, text="x" * 7000, index=0)],
         format="text",
     )
-    prompt = _build_prompt(doc, {}, ["Unknown"])
+    prompt = _build_prompt(doc, {}, "- Unknown")
     assert "x" * 6500 in prompt

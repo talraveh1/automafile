@@ -19,6 +19,7 @@ from dragndoc.ocr import (
     tesseract_languages,
     tesseract_version,
 )
+from dragndoc.treewalk import iter_unblocked_directories, iter_unblocked_files
 
 
 log = get_logger(__name__)
@@ -140,15 +141,14 @@ def run_scan(documents_root: Path | None = None, subpath: Path | None = None) ->
     wl = Worklist(ran_at=_utc_now_iso(), documents_root=str(root))
     current_engine = tesseract_version()
     current_langs = settings.tesseract_langs
+    current_directory: Path | None = None
 
-    for path in walk_root.rglob("*"):
-        if not path.is_file():
-            continue
-        # any dot-prefixed path component (covers .meta/ and any other hidden dirs)
-        rel_parts = path.relative_to(root).parts
-        if any(p.startswith(".") for p in rel_parts):
-            wl.skipped += 1
-            continue
+    for path in iter_unblocked_files(walk_root):
+        if path.parent != current_directory:
+            current_directory = path.parent
+            log.info("scan: entering %s", current_directory)
+
+        log.info("scan: checking %s", path)
         ext = path.suffix.lower()
         wl.files_seen += 1
         wl.tree_size += 1
@@ -230,19 +230,23 @@ def run_scan(documents_root: Path | None = None, subpath: Path | None = None) ->
 
     # quarantined sidecars (corrupt files moved aside by sidecar.read)
     meta_name = settings.meta_subfolder
-    for path in walk_root.rglob(f"{meta_name}/*.broken-*"):
-        if not path.is_file():
+    for directory in iter_unblocked_directories(walk_root):
+        meta_dir = directory / meta_name
+        if not meta_dir.is_dir():
             continue
-        # the original sidecar name had ``.broken-<ts>`` appended; strip that
-        # to recover the filename it described
-        original_sidecar_name = re.sub(r"\.broken-\d{8}-\d{6}$", "", path.name)
-        described_filename = original_sidecar_name[:-3] if original_sidecar_name.endswith(".md") else original_sidecar_name
-        described_path = path.parent.parent / described_filename
-        wl.quarantined_sidecars.append({
-            "quarantine_relative_path": str(path.relative_to(root)).replace("\\", "/"),
-            "for_file": _rel(described_path),
-            "original_filename": original_sidecar_name,
-        })
+        for path in meta_dir.glob("*.broken-*"):
+            if not path.is_file():
+                continue
+            # the original sidecar name had ``.broken-<ts>`` appended; strip that
+            # to recover the filename it described
+            original_sidecar_name = re.sub(r"\.broken-\d{8}-\d{6}$", "", path.name)
+            described_filename = original_sidecar_name[:-3] if original_sidecar_name.endswith(".md") else original_sidecar_name
+            described_path = path.parent.parent / described_filename
+            wl.quarantined_sidecars.append({
+                "quarantine_relative_path": str(path.relative_to(root)).replace("\\", "/"),
+                "for_file": _rel(described_path),
+                "original_filename": original_sidecar_name,
+            })
 
     log.info(
         "scan complete under %s: seen=%d skipped=%d need_ocr=%d need_meta=%d "

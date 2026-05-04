@@ -23,10 +23,10 @@ python scripts\install.py
 # pin <documents_root>\<inbox_dir> to "Always keep on this device" in OneDrive
 
 # start the watcher
-.\.venv\Scripts\python.exe -m dragndoc watch
+.\.venv\Scripts\dnd.exe watch start --fg
 
 # in a second terminal, start the toaster (renders Windows toasts from the events journal)
-.\.venv\Scripts\python.exe -m dragndoc toaster
+.\.venv\Scripts\dnd.exe toaster
 
 # optional: register the toaster as a Windows scheduled task that auto-starts at logon
 python scripts\toaster.py            # install / refresh
@@ -47,9 +47,25 @@ docker compose up -d --build
 # follow the logs
 docker compose logs -f
 
+# pause the watcher without stopping the container
+docker compose exec dragndoc dnd watch stop
+
+# resume the watcher
+docker compose exec dragndoc dnd watch start
+
 # stop the watcher
 docker compose down
 ```
+
+The compose stack bind-mounts the repo at `/workspace` and then overlays
+`/workspace/.venv` with a named Docker volume. That keeps the container's
+Linux venv separate from the host's Windows venv while preserving the same
+`.venv` path in both environments and in VS Code.
+
+The container now starts through a small supervisor: it runs the watcher by
+default, keeps the container alive when you intentionally pause the watcher,
+and exits non-zero if the watcher dies unexpectedly so Docker can restart it.
+That same startup path is used in the VS Code devcontainer.
 
 The toaster always runs on the host (it's tiny, has no LLM/OCR dependencies,
 and needs the host's notification center). It tails
@@ -68,8 +84,8 @@ nothing else from the host is reachable.
 - **Containerized**: a Compose-compatible runtime (Docker Desktop or Podman
   Desktop); Ollama running on the host.
 
-Run `python -m dragndoc doctor` (native) or `docker compose run --rm
-dragndoc python -m dragndoc doctor` (container) after install to verify
+Run `.\.venv\Scripts\dnd.exe doctor` (native) or `docker compose run --rm
+dragndoc dnd doctor` (container) after install to verify
 everything is reachable.
 
 > **Git Bash gotcha**: when invoking the container CLI from MSYS-based
@@ -91,7 +107,10 @@ and the **`documents_root`** you configure. It never reaches outside.
 
 | Command | Purpose |
 | --- | --- |
-| `dnd watch` | Start the watcher in the foreground. |
+| `dnd watch` | Show the watcher subcommands and options. |
+| `dnd watch start` | Start or resume the watcher; `--fg` runs it in the foreground. |
+| `dnd watch stop` | Pause the supervised background watcher without stopping the container. |
+| `dnd watch status` | Show whether the supervised watcher is running, stopped, or idle. |
 | `dnd toaster` | Tail the events journal and fire Windows toasts; hosts a tray icon (right-click → Triage / Log / Exit). `--no-tray` for headless. |
 | `dnd process <path>` | Process a single file once. |
 | `dnd ocr <path>` | Force OCR on a file. |
@@ -100,7 +119,7 @@ and the **`documents_root`** you configure. It never reaches outside.
 | `dnd reconcile` | Walk orphan sidecars interactively. |
 | `dnd bootstrap` | Seed config + memory + folders. |
 | `dnd doctor` | Diagnose the environment. |
-| `dnd filer-apply` | Move a file into `<documents_root>/<category>/...` (used by `/triage`). |
+| `dnd mv <src> <dst>` | Move a file together with its sidecar; this is the filing action Claude uses after deciding the destination path. |
 
 ## Layout
 

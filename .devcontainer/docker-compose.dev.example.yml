@@ -1,12 +1,12 @@
 # Override applied by VS Code Dev Containers on top of ../compose.yml.
 # Copy this file to docker-compose.dev.yml and edit the host paths below.
-# Swaps PID 1 to a no-op so VS Code can attach. Run the app yourself from
-# a VS Code terminal, e.g. `dnd watch`.
+# Reuses the same supervisor entrypoint as the normal container so Docker
+# still sees the watcher logs and restarts on unexpected crashes. Use
+# `dnd watch stop` to pause the watcher without stopping the container,
+# and `dnd watch start` to resume it.
 
 services:
   dragndoc:
-    command: ["sleep", "infinity"]
-    restart: "no"
     volumes:
       # AI tool configs — REPLACE the host paths with yours
       - "C:/Users/<you>/.claude:/home/dragndoc/.claude"

@@ -26,6 +26,12 @@ def venv_python(venv: Path) -> Path:
     return venv / "bin" / "python"
 
 
+def venv_dnd(venv: Path) -> Path:
+    if sys.platform == "win32":
+        return venv / "Scripts" / "dnd.exe"
+    return venv / "bin" / "dnd"
+
+
 def run(cmd: Sequence[str | Path], **kwargs) -> None:
     rendered = [str(c) for c in cmd]
     print(f">> {' '.join(rendered)}")
@@ -37,20 +43,21 @@ def main() -> int:
         sys.exit(f"Python 3.12+ required (got {sys.version.split()[0]}).")
 
     py = venv_python(VENV)
+    dnd = venv_dnd(VENV)
     if not py.exists():
         print(f"Creating venv at {VENV}")
         run([sys.executable, "-m", "venv", str(VENV)])
 
     run([py, "-m", "pip", "install", "--upgrade", "pip"])
     run([py, "-m", "pip", "install", "-e", ".[dev]"], cwd=REPO)
-    run([py, "-m", "dragndoc", "bootstrap"], cwd=REPO)
+    run([dnd, "bootstrap"], cwd=REPO)
 
     print()
     print("Bootstrap complete. Next steps:")
     print(f"  1. Edit {REPO / 'config.jsonc'} if your defaults differ.")
     print("  2. Pin <documents_root>\\<inbox_dir> to 'Always keep on this device' in OneDrive.")
-    print(f"  3. Start the watcher: {py} -m dragndoc watch")
-    print(f"  4. Start the toaster (separate terminal): {py} -m dragndoc toaster")
+    print(f"  3. Start the watcher: {dnd} watch start --fg")
+    print(f"  4. Start the toaster (separate terminal): {dnd} toaster")
     print( "     (or run 'python scripts\\toaster.py' to auto-start it at logon)")
     return 0
 

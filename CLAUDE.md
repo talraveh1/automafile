@@ -18,8 +18,8 @@ Files live in the user's filesystem under `<documents_root>/<inbox_dir>`
 OCR when needed, calls Ollama for enrichment, and writes metadata to a
 `.meta/<filename>.md` sidecar — every file gets one, regardless of format.
 Original documents are never modified. The `/triage` skill decides where
-each file is filed; moves go through `python -m dragndoc mv` or
-`filer-apply` so the sidecar always travels with the file.
+each file is filed; moves go through `dnd mv` so the sidecar always travels
+with the file.
 
 ## Run modes
 

@@ -44,6 +44,22 @@ def test_process_dry_run_does_not_write(docs_root):
     assert not sc.sidecar_path_for(p).exists()
 
 
+def test_process_skips_blocked_meta_tree(docs_root):
+    blocked_dir = docs_root / "Inbox" / "bundle"
+    blocked_dir.mkdir(parents=True, exist_ok=True)
+    (blocked_dir / ".meta").write_text("marker", encoding="utf-8")
+
+    p = blocked_dir / "note.txt"
+    p.write_text("hi", encoding="utf-8")
+
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
+        result = process_file(p)
+
+    assert result.error == "blocked_by_meta_file"
+    assert result.metadata_target == "skipped"
+    assert result.sidecar_path is None
+
+
 def test_process_pdf_writes_sidecar_only(docs_root):
     """PDFs (like every other format) get a sidecar, never native metadata in the file."""
     import pikepdf

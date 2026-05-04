@@ -17,12 +17,96 @@ from dragndoc.log import get_logger
 
 log = get_logger(__name__)
 
+HELP_CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
 
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
     help="Drag'n'Doc — watch a folder, enrich files with metadata, file them via Claude.",
 )
+watch_app = typer.Typer(
+    add_completion=False,
+    invoke_without_command=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+    help="Control the watcher.",
+)
+app.add_typer(watch_app, name="watch")
+
+
+def _maybe_override_documents_root(documents_root: Path | None) -> None:
+    if documents_root is None:
+        return
+    os.environ["DOCUMENTS_ROOT"] = str(documents_root.resolve())
+    from dragndoc.config import reset_settings
+
+    reset_settings()
+
+
+def _run_watch_foreground(documents_root: Path | None) -> None:
+    _maybe_override_documents_root(documents_root)
+    log.info("CLI: watch (documents_root=%s)", documents_root)
+    from dragndoc.watcher import run_watcher
+
+    run_watcher()
+
+
+def _request_watch_stop(*, wait: bool, timeout: float) -> None:
+    log.info("CLI: watch stop (wait=%s timeout=%s)", wait, timeout)
+    from dragndoc.runtime import request_stop, wait_for_running
+
+    request_stop()
+    if wait and not wait_for_running(False, timeout=timeout):
+        typer.echo("watcher stop request sent, but it did not stop before the timeout", err=True)
+        raise typer.Exit(1)
+    typer.echo("watcher stop requested")
+
+
+def _request_watch_start(*, fg: bool, documents_root: Path | None, wait: bool, timeout: float) -> None:
+    from dragndoc.runtime import request_start, status_snapshot, wait_for_running
+
+    if fg:
+        snapshot = status_snapshot()
+        if bool(snapshot["running"]):
+            typer.echo("supervised watcher is already running; stop it first or use the existing background watcher", err=True)
+            raise typer.Exit(1)
+        log.info("CLI: watch start --fg (documents_root=%s)", documents_root)
+        _run_watch_foreground(documents_root)
+        return
+
+    if documents_root is not None:
+        typer.echo("--documents-root is only supported with --fg", err=True)
+        raise typer.Exit(2)
+
+    snapshot = status_snapshot()
+    if bool(snapshot["running"]):
+        pid = snapshot["pid"]
+        typer.echo(f"watcher already running (pid={pid})")
+        return
+
+    log.info("CLI: watch start (wait=%s timeout=%s)", wait, timeout)
+    request_start()
+    if wait and not wait_for_running(True, timeout=timeout):
+        typer.echo(
+            "background watcher start was requested, but no supervisor started it before the timeout; use `dnd supervise` or `dnd watch start --fg`",
+            err=True,
+        )
+        raise typer.Exit(1)
+    typer.echo("watcher start requested")
+
+
+def _show_watch_status() -> None:
+    log.info("CLI: watch status")
+    from dragndoc.runtime import status_snapshot
+
+    snapshot = status_snapshot()
+    state = snapshot["state"]
+    pid = snapshot["pid"]
+    if pid is None:
+        typer.echo(f"watcher: {state}")
+        return
+    typer.echo(f"watcher: {state} (pid={pid})")
 
 
 @app.callback()
@@ -32,19 +116,47 @@ def _root(version: Annotated[bool, typer.Option("--version", help="Print version
         raise typer.Exit(0)
 
 
+@watch_app.callback()
+def watch(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is not None:
+        return
+    typer.echo(ctx.get_help(), nl=False)
+    raise typer.Exit(0)
+
+
 @app.command()
-def watch(
-    documents_root: Annotated[Optional[Path], typer.Option("--documents-root", help="Override DOCUMENTS_ROOT.")] = None,
+def supervise() -> None:
+    """Run the container supervisor that owns the watcher process."""
+    log.info("CLI: supervise")
+    from dragndoc.runtime import supervise as supervise_runtime
+
+    raise typer.Exit(supervise_runtime())
+
+
+@watch_app.command("start")
+def watch_start(
+    fg: Annotated[bool, typer.Option("--fg", help="Run the watcher in the foreground instead of resuming the supervised background watcher.")] = False,
+    documents_root: Annotated[Optional[Path], typer.Option("--documents-root", help="Override DOCUMENTS_ROOT when using --fg.")] = None,
+    wait: Annotated[bool, typer.Option("--wait/--no-wait", help="Wait until the background watcher is running.")] = True,
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1, help="Max seconds to wait when --wait is set.")] = 10.0,
 ) -> None:
-    """Start the inbox watcher in the foreground."""
-    if documents_root is not None:
-        import os
-        os.environ["DOCUMENTS_ROOT"] = str(documents_root.resolve())
-        from dragndoc.config import reset_settings
-        reset_settings()
-    log.info("CLI: watch (documents_root=%s)", documents_root)
-    from dragndoc.watcher import run_watcher
-    run_watcher()
+    """Start or resume the watcher."""
+    _request_watch_start(fg=fg, documents_root=documents_root, wait=wait, timeout=timeout)
+
+
+@watch_app.command("stop")
+def watch_stop(
+    wait: Annotated[bool, typer.Option("--wait/--no-wait", help="Wait until the watcher has stopped.")] = True,
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1, help="Max seconds to wait when --wait is set.")] = 10.0,
+) -> None:
+    """Stop the supervised watcher without exiting the container."""
+    _request_watch_stop(wait=wait, timeout=timeout)
+
+
+@watch_app.command("status")
+def watch_status() -> None:
+    """Show whether the supervised watcher is running, stopped, or idle."""
+    _show_watch_status()
 
 
 @app.command()
@@ -694,39 +806,6 @@ def toaster(
     log.info("CLI: toaster (no_tray=%s)", no_tray)
     from dragndoc.toaster import run_toaster
     run_toaster(tray=not no_tray)
-
-
-@app.command("filer-apply")
-def filer_apply_cmd(
-    path: Annotated[Path, typer.Argument(help="The file to file.")],
-    category: Annotated[str, typer.Option(help="Top-level category.")] = "Unknown",
-    subcategory: Annotated[Optional[str], typer.Option(help="Optional subcategory.")] = None,
-    name: Annotated[Optional[str], typer.Option(help="Smart filename. Auto-derived if omitted.")] = None,
-    overwrite: Annotated[bool, typer.Option("--overwrite", help="Overwrite the target if it exists with different content.")] = False,
-) -> None:
-    r"""Move ``path`` into the managed tree under ``category\[/subcategory]/<name>``."""
-    log.info("CLI: filer-apply %s (category=%s subcategory=%s overwrite=%s)", path, category, subcategory, overwrite)
-    from dragndoc.filer import FilingProposal, apply_filing, smart_filename
-    from dragndoc.metadata.sidecar import read as sidecar_read
-
-    if name is None:
-        doc, summary, _ = sidecar_read(path)
-        meta = {}
-        if doc is not None:
-            meta = {
-                "title": doc.title,
-                "summary": summary or "",
-                "correspondent": doc.correspondent,
-                "date": doc.date,
-                "category": category,
-                "subcategory": subcategory,
-            }
-        meta["extension"] = path.suffix.lstrip(".")
-        name = smart_filename(meta, path.suffix.lstrip("."))
-
-    proposal = FilingProposal(category=category, subcategory=subcategory, smart_name=name)
-    target = apply_filing(path, proposal, overwrite=overwrite)
-    typer.echo(f"filed: {target}")
 
 
 def main() -> None:  # pragma: no cover

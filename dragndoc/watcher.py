@@ -13,6 +13,7 @@ from dragndoc.config import get_settings
 from dragndoc.log import get_logger
 from dragndoc.events import append as append_event
 from dragndoc.pipeline import format_result_line, process_file
+from dragndoc.treewalk import is_in_blocked_subtree
 
 
 log = get_logger(__name__)
@@ -44,6 +45,9 @@ class _InboxHandler(FileSystemEventHandler):
     def _maybe_process(self, path: Path) -> None:
         settings = get_settings()
         if path.parent.name == settings.meta_subfolder:
+            return
+        if is_in_blocked_subtree(path, stop_at=settings.documents_root):
+            log.info("Skipping new file under blocked subtree: %s", path)
             return
         if path.suffix.lower() in {".tmp", ".part", ".crdownload"}:
             return

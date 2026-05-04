@@ -6,7 +6,6 @@ memory/
 .git/
 .gitignore
 .pytest_cache/
-.serena/
 .claude/
 __pycache__/
 *.pyc

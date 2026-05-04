@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from dragndoc.metadata import sidecar
@@ -22,6 +23,61 @@ def test_run_scan_flags_unmetadataed_text_file(docs_root):
     wl = run_scan()
     assert wl.files_seen == 1
     assert any(f["relative_path"].endswith("note.txt") for f in wl.files_needing_metadata)
+
+
+def test_run_scan_skips_subtree_with_meta_file_marker(docs_root):
+    keep = docs_root / "Inbox" / "keep.txt"
+    keep.write_text("keep", encoding="utf-8")
+
+    blocked_dir = docs_root / "Inbox" / "bundle"
+    blocked_dir.mkdir(parents=True, exist_ok=True)
+    (blocked_dir / ".meta").write_text("marker", encoding="utf-8")
+
+    skipped = blocked_dir / "nested" / "skip.txt"
+    skipped.parent.mkdir(parents=True, exist_ok=True)
+    skipped.write_text("skip", encoding="utf-8")
+
+    wl = run_scan()
+    rels = [entry["relative_path"] for entry in wl.files_needing_metadata]
+
+    assert wl.files_seen == 1
+    assert "Inbox/keep.txt" in rels
+    assert not any("bundle/" in rel for rel in rels)
+
+
+def test_run_scan_subpath_does_not_check_parent_meta_marker(docs_root):
+    blocked_dir = docs_root / "Inbox" / "bundle"
+    blocked_dir.mkdir(parents=True, exist_ok=True)
+    (blocked_dir / ".meta").write_text("marker", encoding="utf-8")
+
+    nested = blocked_dir / "nested"
+    nested.mkdir(parents=True, exist_ok=True)
+    target = nested / "note.txt"
+    target.write_text("scan me", encoding="utf-8")
+
+    wl = run_scan(subpath=Path("Inbox/bundle/nested"))
+    rels = [entry["relative_path"] for entry in wl.files_needing_metadata]
+
+    assert wl.files_seen == 1
+    assert rels == ["Inbox/bundle/nested/note.txt"]
+
+
+def test_run_scan_logs_directories_and_files_at_info(docs_root, caplog):
+    alpha = docs_root / "Inbox" / "alpha.txt"
+    alpha.write_text("a", encoding="utf-8")
+    nested = docs_root / "Inbox" / "nested"
+    nested.mkdir(parents=True, exist_ok=True)
+    beta = nested / "beta.txt"
+    beta.write_text("b", encoding="utf-8")
+
+    with caplog.at_level(logging.INFO):
+        run_scan()
+
+    messages = [record.getMessage() for record in caplog.records if record.name == "dragndoc.scanner"]
+    assert any("scan: entering" in message and str(alpha.parent) in message for message in messages)
+    assert any("scan: entering" in message and str(beta.parent) in message for message in messages)
+    assert any("scan: checking" in message and str(alpha) in message for message in messages)
+    assert any("scan: checking" in message and str(beta) in message for message in messages)
 
 
 def test_run_scan_writes_worklist_file(docs_root):

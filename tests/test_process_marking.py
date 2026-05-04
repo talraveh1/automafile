@@ -96,7 +96,7 @@ def test_failed_file_is_not_marked(docs_root):
     bad = docs_root / "Inbox" / "bad.txt"
 
     real_enrich = _FAKE
-    def fake_enrich(text, hints=None, taxonomy=None):
+    def fake_enrich(text, hints=None):
         # Inject a runtime error for bad.txt by pretending the file is missing
         # via a side-effect inside enrich.
         if hints and hints.get("filename") == "bad.txt":
@@ -179,7 +179,7 @@ def test_atomic_write_persists_after_each_file(docs_root):
                          ["Inbox/a.txt", "Inbox/b.txt"])
 
     call_count = {"n": 0}
-    def crashy(text, hints=None, taxonomy=None):
+    def crashy(text, hints=None):
         call_count["n"] += 1
         if call_count["n"] == 2:
             raise RuntimeError("simulated crash")

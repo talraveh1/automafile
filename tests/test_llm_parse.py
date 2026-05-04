@@ -66,7 +66,8 @@ def test_correspondent_list_is_flattened_to_string():
     assert result.correspondent == "Ian Sommerville, Nuri Whitney, D.C. Schmidt"
 
 
-def test_category_alias_medical_to_personal():
-    raw = '{"title":"prescription","summary":"hi","tags":["rx"],"category":"medical","subcategory":null,"correspondent":null,"date":null,"amount":null,"currency":null,"language":"en","confidence":"medium","review":false,"reason":null}'
+def test_category_passes_through_unchanged():
+    """Category is now sourced from the user's taxonomy file; no in-code alias map."""
+    raw = '{"title":"prescription","summary":"hi","tags":["rx"],"category":"Medical","subcategory":null,"correspondent":null,"date":null,"amount":null,"currency":null,"language":"en","confidence":"medium","review":false,"reason":null}'
     result = parse_with_tiers(raw)
-    assert result.category == "Personal"
+    assert result.category == "Medical"

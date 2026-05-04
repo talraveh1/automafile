@@ -25,6 +25,7 @@ from dragndoc.ocr import (
     tesseract_available,
     tesseract_version,
 )
+from dragndoc.treewalk import is_in_blocked_subtree
 
 
 log = get_logger(__name__)
@@ -111,6 +112,7 @@ def _hints_for(doc: ExtractedDoc) -> dict:
 
 def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -> ProcessResult:
     started = time.perf_counter()
+    settings = get_settings()
     result = ProcessResult(path=path)
     log.info("processing %s%s", path, " (dry-run)" if dry_run else "")
 
@@ -118,6 +120,13 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         result.error = "missing_or_not_file"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         log.error("cannot process %s: %s", path, result.error)
+        return result
+
+    if is_in_blocked_subtree(path, stop_at=settings.documents_root):
+        result.error = "blocked_by_meta_file"
+        result.metadata_target = "skipped"
+        result.duration_ms = int((time.perf_counter() - started) * 1000)
+        log.info("skipping %s: ancestor directory contains file %s", path, settings.meta_subfolder)
         return result
 
     try:

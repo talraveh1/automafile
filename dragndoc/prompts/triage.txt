@@ -25,7 +25,7 @@ Output schema (all keys required, ordering as shown):
   "reason":        string|null     // one short sentence explaining the chosen category. Optional.
 }
 
-Taxonomy categories (use exactly one of these strings for `category`):
+Taxonomy (the user's source of truth, in markdown — a nested bullet list). Top-level bullets are category names; nested bullets directly under a category are its subcategories. If a bullet has an em-dash followed by text (e.g., `- Medical — health-related documents`), the text after the em-dash is the user's description of that name's intent — use it to disambiguate, but do NOT include it in the output value. Set `category` to exactly one of the top-level names. Set `subcategory` to one of its nested names if one clearly applies, else null. Do not invent categories or subcategories not present below:
 {taxonomy}
 
 Context: filesystem facts plus source-declared metadata such as Office properties, PDF DocInfo/XMP, EXIF, HTML meta, and EPUB Dublin Core. Keys keep source-style prefixes (``core_*``, ``info_*``, ``dc:*``, ``xmp:*``, ``pdf:*``, ``exif_*``, ``meta_*``, ``dc_*``). Values may be missing, partial, or stale. Treat them as soft context: use clear creator, GPS, or date signals; ignore weak or conflicting ones.

@@ -11,6 +11,7 @@ from dragndoc.config import get_settings
 from dragndoc.log import get_logger
 from dragndoc.metadata.hashing import hash_file
 from dragndoc.metadata.sidecar import sidecar_path_for, read as sidecar_read
+from dragndoc.treewalk import iter_unblocked_directories, iter_unblocked_files
 
 
 log = get_logger(__name__)
@@ -29,20 +30,19 @@ class OrphanReport:
 
 
 def iter_files(root: Path):
-    for path in root.rglob("*"):
-        if not path.is_file():
-            continue
-        # any dot-prefixed component (covers .meta/ and any other hidden dirs)
-        if any(part.startswith(".") for part in path.relative_to(root).parts):
-            continue
+    for path in iter_unblocked_files(root):
         yield path
 
 
 def iter_sidecars(root: Path):
     meta_name = get_settings().meta_subfolder
-    for path in root.rglob(meta_name + "/*.md"):
-        if path.is_file():
-            yield path
+    for directory in iter_unblocked_directories(root):
+        meta_dir = directory / meta_name
+        if not meta_dir.is_dir():
+            continue
+        for path in meta_dir.glob("*.md"):
+            if path.is_file():
+                yield path
 
 
 def _load_cache(scan_dir: Path) -> dict[str, Any]:

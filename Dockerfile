@@ -29,11 +29,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# serena-agent — provides the `serena-hooks` binary called by Claude Code's
-# PreToolUse / SessionStart / Stop hooks in ~/.claude/settings.json.
-# Installed system-wide so it's on PATH for the non-root user below.
-RUN pip install --no-cache-dir serena-agent
-
 # non-root user for safer file ops on bind-mounted volumes
 ARG UID=1000
 ARG GID=1000
@@ -44,17 +39,24 @@ RUN groupadd -g ${GID} dragndoc \
 
 WORKDIR /workspace
 
-# install Python deps via the project's pyproject.toml
-# (the workspace itself is bind-mounted at runtime, so we install into the image
-# from a copy here purely so cold container starts don't have to repeat pip)
+# install Python deps into a workspace-local venv that will seed the named
+# volume mounted at /workspace/.venv on first container create.
 COPY pyproject.toml ./
 COPY dragndoc/__init__.py dragndoc/__init__.py
-RUN mkdir -p build \
-    && pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -e .[dev] \
-    && rm -rf dragndoc
+RUN python -m venv /workspace/.venv \
+    && mkdir -p build \
+    && /workspace/.venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /workspace/.venv/bin/pip install --no-cache-dir -e .[dev] \
+    && rm -rf dragndoc \
+    && chown -R dragndoc:dragndoc /workspace/.venv
 
 USER dragndoc
+
+# container-local venv that lives on a named volume at /workspace/.venv.
+# the parent /workspace remains a host bind mount, so both sides keep the
+# same path while using different env contents.
+ENV VIRTUAL_ENV=/workspace/.venv
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 # the docs root and Ollama URL are container-local; the host's config.jsonc
 # and host paths are unaffected

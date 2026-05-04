@@ -18,6 +18,11 @@ services:
       # the project workspace — code lives on the host, runs in the container
       - .:/workspace
 
+      # private Linux venv layered over the bind mount so the host can keep a
+      # Windows .venv at the same repo path without the two environments
+      # clobbering each other
+      - dragndoc-venv:/workspace/.venv
+
       # the user's documents tree — REPLACE the host path with yours
       - "C:/Users/<you>/OneDrive/Documents:/docs"
 
@@ -32,4 +37,7 @@ services:
       - "host.docker.internal:host-gateway"
 
     working_dir: /workspace
-    command: ["python", "-m", "dragndoc", "watch"]
+    command: ["dnd", "supervise"]
+
+volumes:
+  dragndoc-venv:
