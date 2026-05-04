@@ -7,9 +7,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from dragndoc.cli import app
-from dragndoc.metadata import sidecar
+from dragndoc.meta_store import Doc, OcrInfo, get_by_file, relative_to_root, upsert
 from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.schema import MetadataDoc, OcrBlock
 
 
 runner = CliRunner()
@@ -17,32 +16,31 @@ runner = CliRunner()
 
 def _seed(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
-    meta = MetadataDoc(
-        content_hash=hash_file(path),
-        file_size=path.stat().st_size,
-        filename_at_creation=path.name,
-        relative_path=str(path.name),
+    upsert(Doc(
+        path=relative_to_root(path),
+        hash=hash_file(path),
+        size=path.stat().st_size,
+        original=path.name,
         category="Personal",
-        ocr=OcrBlock(decision="never"),
-    )
-    sidecar.write(path, meta, summary_body="seeded")
+        summary="seeded",
+        ocr=OcrInfo(decision="never"),
+    ))
 
 
-def test_rm_removes_file_and_sidecar(docs_root):
+def test_rm_removes_file_and_row(docs_root):
     target = docs_root / "Inbox" / "note.txt"
     _seed(target, "hello")
-    sc = sidecar.sidecar_path_for(target)
-    assert sc.exists()
+    assert get_by_file(target) is not None
 
     result = runner.invoke(app, ["rm", str(target)])
     assert result.exit_code == 0, result.output
     assert not target.exists()
-    assert not sc.exists()
+    assert get_by_file(target) is None
 
 
-def test_rm_without_sidecar_still_removes_file(docs_root):
+def test_rm_without_row_still_removes_file(docs_root):
     target = docs_root / "Inbox" / "bare.txt"
-    target.write_text("no sidecar", encoding="utf-8")
+    target.write_text("no row", encoding="utf-8")
 
     result = runner.invoke(app, ["rm", str(target)])
     assert result.exit_code == 0, result.output

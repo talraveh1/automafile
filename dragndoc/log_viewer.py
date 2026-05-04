@@ -6,7 +6,7 @@ the pystray main thread.
 
     python -m dragndoc.log_viewer [path/to/log]
 
-Defaults to ``<storage_dir>/logs/dragndoc.log`` if no path is given.
+Defaults to ``<data_dir>/logs/dragndoc.log`` if no path is given.
 """
 
 from __future__ import annotations

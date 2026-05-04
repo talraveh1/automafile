@@ -17,21 +17,21 @@ flowchart LR
    subgraph output ["<b>Output</b>"]
       direction TB
       llm["<b>LLM</b> · Ollama<br/><i>tiered JSON parse</i>"]:::ai
-      writers["<b>Sidecar Writer</b><br/><i>.meta/&lt;name&gt;.md</i>"]:::write
+      writers["<b>Meta Store</b><br/><i>upsert docs+ocr<br/>FTS5 mirror</i>"]:::write
    end
 
-   events[("<b>events.jsonl</b><br/><i>storage/</i>")]:::journal
-   toaster["<b>Toaster</b><br/><i>host process<br/>cursor + compact</i>"]:::notify
+   db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · events · docs_fts</i>")]:::journal
+   toaster["<b>Toaster</b><br/><i>host process<br/>polls events.id</i>"]:::notify
 
-   cli["<b>Triage CLI</b><br/><i>inspect · mv<br/>scan · review-ocr · reconcile</i>"]:::tool
+   cli["<b>CLI</b><br/><i>process · scan · review<br/>meta get/cat/set/edit · grep<br/>mv · cp · rm · ls</i>"]:::tool
    triage[/"🗂️ Triage skill"/]:::tool
 
    inbox --> watcher --> pipeline
    pipeline --> dispatch --> extractors --> output
    pipeline --> ocr --> ocr_decision --> output
    llm --> writers
-   writers -->|append| events
-   events -->|tail| toaster
+   writers -->|upsert| db
+   db -->|poll by id| toaster
    triage <-.-> cli
    style extract fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#0f172a
    style output fill:#f5f3ff,stroke:#a78bfa,stroke-width:2px,color:#312e81
@@ -60,47 +60,61 @@ flowchart LR
    `pdf2image` + Tesseract for PDFs).
 6. `llm.enrich` calls Ollama. The response is parsed via tiered fallbacks:
    strict → repair → retry → regex → placeholder.
-7. Metadata is always written to a Markdown+YAML sidecar at
-   `<dir>/.meta/<filename>.md` via `metadata.sidecar.write`. The original
-   document is never touched. The hidden `.meta/` folder rides along with
-   the file in OneDrive sync.
-8. The watcher appends a `processed` event to `storage/events.jsonl`
-   (sidecar quarantine appends `quarantined`). The pipeline never renders
-   notifications itself.
+7. Metadata is upserted into `data/dragndoc.db` via `meta_store.upsert` —
+   one row in `docs` keyed by relative path, one row in `ocr` (if OCR was
+   considered). The original document is never touched. SQLite triggers
+   keep `docs_fts` (FTS5 over `title`/`summary`/`notes`/`tags`/`parties`)
+   in sync automatically.
+8. The pipeline appends a `processed` event row to the `events` table.
+   The pipeline never renders notifications itself.
+
+## Storage layout
+
+```text
+data/
+├── dragndoc.db          # SQLite, WAL-mode, locally-backed-up
+├── tessdata/            # Tesseract language packs
+├── runtime/             # watch.pid, watch.disabled
+├── logs/                # dragndoc.log
+└── toaster.cursor       # last-seen events.id (small int)
+```
+
+The `data/` directory is **never** placed on OneDrive. SQLite + sync
+providers don't mix safely. Backups of `data/` are user-managed and
+periodic; corruption is recoverable from backup or by re-running the
+pipeline against the documents tree (which rebuilds metadata from
+extraction + LLM, but loses any user edits since the last backup).
 
 ## Toaster
 
-`dnd toaster` is a separate, long-running consumer of
-`storage/events.jsonl`. It tails the file with a 1 s poll, persists a
-byte offset to `storage/toaster.cursor` after every fired toast (so
-restarts never miss or duplicate), and renders Windows toasts via the
-debounced `Notifier` — bursts collapse into a single
-"Processed N files" toast within `_DEBOUNCE_SECONDS` (5 s).
-
-When the journal exceeds 1 MB *and* the cursor has caught up to EOF,
-the toaster truncates the file and resets the cursor to 0. Single
-consumer, so no coordination with the appender is required; the
-worst-case race (one event lost or duplicated within a millisecond) is
-acceptable for notification UX.
+`dnd toaster` is a separate, long-running consumer of the `events`
+table. It polls `SELECT id, ts, kind, payload FROM events WHERE id > ?
+ORDER BY id LIMIT 500` once per second, persists the highest-seen id to
+`data/toaster.cursor` after every fired toast (so restarts never miss
+or duplicate), and renders Windows toasts via the debounced `Notifier`.
 
 This decoupling lets the pipeline run inside a container while the
-toaster runs on the host — the bind-mounted workspace is the only
-shared surface needed.
+toaster runs on the host — the bind-mounted `data/` directory is the
+only shared surface needed (the toaster opens the SQLite file
+read-only).
 
 ## Scanner
 
-`dnd scan` walks the tree, builds a hash index (cached by
-`(mtime, size)` in `storage/scan/hash-index.json`), and emits a worklist
-JSON to `storage/scan/scan-<ts>.json`. It identifies:
+`dnd scan` walks the tree and produces an in-memory `Worklist`
+describing what `process` would do:
 
-- `files_needing_ocr` — text-layer-less PDFs, images without metadata.
-- `files_needing_metadata` — supported types with no sidecar/native data.
-- `files_with_partial_metadata` — sidecars missing required fields.
-- `files_with_stale_metadata` — file mtime newer than `metadata_modified`.
-- `ocr_review_candidates` — files OCR'd with a different engine/lang.
-- `orphan_sidecars` — sidecars whose target file is missing, with hash
-  matches in the tree.
+- `files_needing_ocr` — text-layer-less PDFs, images without a row.
+- `files_needing_metadata` — supported types with no `docs` row.
+- `files_with_partial_metadata` — rows missing required fields.
+- `files_with_stale_metadata` — file mtime newer than the row's
+  `modified` (the file's mtime captured at last digest).
+- `ocr_review_candidates` — rows whose `engine_ver` / `langs` differ
+  from the current settings.
+- `missing_files` — `docs` rows whose `path` no longer resolves to a
+  file on disk; `dnd review orphans` proposes hash-matched relinks.
 - `unprocessable_files` — encrypted PDFs, etc.
+
+The worklist is never persisted to disk; callers consume it directly.
 
 ## Memory
 
@@ -114,32 +128,30 @@ The pipeline is deployable two ways without code changes:
 
 - **Native venv** on Windows (host). Direct OS access; the watcher and
   toaster run as separate foreground processes.
-- **Linux container** (Docker / Podman). Bind-mounts `<documents_root>` to
-  `/docs` and the project workspace to `/workspace`. Reaches the host's
-  Ollama via `host.docker.internal:11434`. The toaster always runs on the
-  host regardless of mode — it tails `storage/events.jsonl` through the
-  bind-mounted workspace, so toasts surface natively even when the
-  pipeline is containerized.
-
-The choice is purely about isolation — the container variant exists so an
-agent (Claude Code or otherwise) running inside it cannot reach files
-outside the bind-mounts.
+- **Linux container** (Docker / Podman). Bind-mounts `<documents_root>`
+  to `/docs` and the project's `data/` directory through the workspace
+  mount. Reaches the host's Ollama via `host.docker.internal:11434`. The
+  toaster always runs on the host regardless of mode — it polls
+  `data/dragndoc.db` through the bind-mounted workspace, so toasts
+  surface natively even when the pipeline is containerized.
 
 `dragndoc.ocr._resolve_tesseract_bin` validates that any configured path
 actually exists before honoring it, so the host's `config.jsonc` (with a
 Windows path) does not break the Linux container — the resolver falls
 through to `shutil.which("tesseract")` instead.
 
-## Sidecars are the only metadata store
+## The DB is the only metadata store
 
 Original documents are never modified — the pipeline reads them, never
-writes back. All extracted/enriched metadata lives in
-`<dir>/.meta/<filename>.md`. Consequences:
+writes back. All extracted/enriched metadata lives in `data/dragndoc.db`.
+Consequences:
 
 - File content hashes and mtimes are stable (no need to snapshot/restore
   timestamps around writes).
-- Sidecars sync with the documents through OneDrive (the `.meta/` folder
-  rides along).
-- Moves must always travel the file *and* its sidecar. Use
-   `dnd mv <src> <dst>` — never raw `mv` / `move`.
-```
+- Moves go through `dnd mv <src> <dst>` so the row's `path` follows the
+  file. A raw `mv` / `move` produces an orphan row that `dnd review
+  orphans` can later relink by content hash.
+- Sharing a document with someone else means sending just the file —
+  metadata stays in your local DB.
+- Backups: back up `data/` independently of the documents tree (the
+  documents tree itself can ride OneDrive; the DB cannot).

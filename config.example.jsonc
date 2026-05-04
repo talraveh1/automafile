@@ -16,9 +16,6 @@
   // documents_root/<Category>[/<SubCategory>]/<smart-name>.<ext>.
   "inbox_dir": "Inbox",
 
-  // The hidden subfolder name used for sidecar files (one per containing dir).
-  "meta_subfolder": ".meta",
-
   // Tesseract OCR.
   "tesseract_langs": "heb+eng",
 

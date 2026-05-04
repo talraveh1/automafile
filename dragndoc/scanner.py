@@ -1,25 +1,27 @@
-"""Tree walker; emits a worklist describing what needs OCR / metadata / review."""
+"""Tree walker; emits an in-memory worklist describing what needs OCR / metadata / review.
+
+The scanner no longer writes JSON to disk. Callers (``dnd process``,
+``dnd review``) consume the returned :class:`Worklist` directly.
+"""
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from dragndoc.config import get_settings
+from dragndoc.db import connect
 from dragndoc.log import get_logger
-from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.reconcile import find_orphans
-from dragndoc.metadata.sidecar import read as sidecar_read, sidecar_path_for
+from dragndoc.meta_store import relative_to_root
+from dragndoc.metadata.reconcile import OrphanReport, find_orphans
 from dragndoc.ocr import (
     pdf_ocr_decision,
     tesseract_languages,
     tesseract_version,
 )
-from dragndoc.treewalk import iter_unblocked_directories, iter_unblocked_files
+from dragndoc.treewalk import iter_unblocked_files
 
 
 log = get_logger(__name__)
@@ -32,7 +34,8 @@ SUPPORTED_EXT = {
     ".xml", ".yaml", ".yml",
 }
 
-OCR_REVIEW_GRACE_DAYS = 0
+
+REQUIRED_METADATA_FIELDS = ("category", "summary", "tags")
 
 
 @dataclass
@@ -47,8 +50,7 @@ class Worklist:
     files_with_partial_metadata: list[dict] = field(default_factory=list)
     files_with_stale_metadata: list[dict] = field(default_factory=list)
     ocr_review_candidates: list[dict] = field(default_factory=list)
-    orphan_sidecars: list[dict] = field(default_factory=list)
-    quarantined_sidecars: list[dict] = field(default_factory=list)
+    missing_files: list[dict] = field(default_factory=list)
     unprocessable_files: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,61 +65,83 @@ class Worklist:
             "files_with_partial_metadata": self.files_with_partial_metadata,
             "files_with_stale_metadata": self.files_with_stale_metadata,
             "ocr_review_candidates": self.ocr_review_candidates,
-            "orphan_sidecars": self.orphan_sidecars,
-            "quarantined_sidecars": self.quarantined_sidecars,
+            "missing_files": self.missing_files,
             "unprocessable_files": self.unprocessable_files,
         }
-
-
-def _rel(path: Path) -> str:
-    settings = get_settings()
-    try:
-        return str(path.relative_to(settings.documents_root)).replace("\\", "/")
-    except ValueError:
-        return str(path).replace("\\", "/")
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-REQUIRED_METADATA_FIELDS = ("category", "summary", "tags")
+def _index_existing_rows() -> dict[str, dict[str, Any]]:
+    """Snapshot every ``docs`` row keyed by ``path``. Read-only, single SELECT."""
+    by_path: dict[str, dict[str, Any]] = {}
+    with connect(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT id, path, hash, size, modified, digested, category, "
+            "title, tags, summary, "
+            "(SELECT engine_ver FROM ocr WHERE doc_id = docs.id) AS ocr_engine_ver, "
+            "(SELECT langs FROM ocr WHERE doc_id = docs.id) AS ocr_langs, "
+            "(SELECT done FROM ocr WHERE doc_id = docs.id) AS ocr_done "
+            "FROM docs"
+        ).fetchall()
+    for r in rows:
+        by_path[r["path"]] = dict(r)
+    return by_path
 
 
-def _metadata_completeness(doc, summary_body: str | None) -> list[str]:
+def _is_partial(row: dict[str, Any]) -> list[str]:
     missing: list[str] = []
-    if not (doc.category and doc.category != "Unknown"):
+    if not row.get("category") or row["category"] == "Unknown":
         missing.append("category")
-    if not (summary_body or doc.title):
+    if not (row.get("summary") or row.get("title")):
         missing.append("summary")
-    if not doc.tags:
+    if not row.get("tags"):
         missing.append("tags")
     return missing
 
 
-def _is_stale(doc, file_path: Path) -> tuple[bool, int]:
+def _is_stale(row: dict[str, Any], file_path: Path) -> tuple[bool, int]:
     try:
         file_mt = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
     except FileNotFoundError:
         return False, 0
+    modified = row.get("modified")
+    if not modified:
+        return False, 0
     try:
-        meta_mt = datetime.fromisoformat(doc.metadata_modified.replace("Z", "+00:00"))
-    except Exception:
+        record_mt = datetime.fromisoformat(str(modified).replace("Z", "+00:00"))
+    except ValueError:
         return False, 0
-    if file_mt <= meta_mt:
+    if file_mt <= record_mt:
         return False, 0
-    delta_days = (file_mt - meta_mt).days
-    return delta_days > 0, delta_days
+    return True, (file_mt - record_mt).days
 
 
-def _ocr_config_drift(doc, current_engine: str, current_langs: str) -> bool:
-    prev_engine = doc.ocr.engine_version or ""
-    prev_langs = doc.ocr.languages or ""
+def _ocr_drift(row: dict[str, Any], current_engine: str, current_langs: str) -> bool:
+    prev_engine = row.get("ocr_engine_ver") or ""
+    prev_langs = row.get("ocr_langs") or ""
+    done = row.get("ocr_done") or ""
+    if not done:
+        return False
     if not (prev_engine or prev_langs):
         return False
-    if not doc.ocr.done_at:
-        return False
-    return (prev_engine != current_engine) or (prev_langs != current_langs)
+    # row's ocr_langs is in semilist form (";heb;eng;"); the current value
+    # comes from settings as "heb+eng". Normalize both to a sorted set for
+    # comparison.
+    return _normalize_langs(prev_langs) != _normalize_langs(current_langs) or prev_engine != current_engine
+
+
+def _normalize_langs(value: str) -> tuple[str, ...]:
+    if not value:
+        return ()
+    parts: list[str] = []
+    for chunk in value.replace("+", ";").split(";"):
+        chunk = chunk.strip()
+        if chunk:
+            parts.append(chunk)
+    return tuple(sorted(set(parts)))
 
 
 def run_scan(documents_root: Path | None = None, subpath: Path | None = None) -> Worklist:
@@ -141,21 +165,27 @@ def run_scan(documents_root: Path | None = None, subpath: Path | None = None) ->
     wl = Worklist(ran_at=_utc_now_iso(), documents_root=str(root))
     current_engine = tesseract_version()
     current_langs = settings.tesseract_langs
+    rows_by_path = _index_existing_rows()
+
     current_directory: Path | None = None
+    seen_paths: set[str] = set()
 
     for path in iter_unblocked_files(walk_root):
         if path.parent != current_directory:
             current_directory = path.parent
             log.info("scan: entering %s", current_directory)
 
-        log.info("scan: checking %s", path)
         ext = path.suffix.lower()
         wl.files_seen += 1
         wl.tree_size += 1
+        rel = relative_to_root(path)
+        seen_paths.add(rel)
 
         if ext not in SUPPORTED_EXT:
             wl.skipped += 1
             continue
+
+        row = rows_by_path.get(rel)
 
         # OCR-needed?
         if ext == ".pdf":
@@ -163,166 +193,95 @@ def run_scan(documents_root: Path | None = None, subpath: Path | None = None) ->
                 decision = pdf_ocr_decision(path)
                 if decision.action == "skip_encrypted":
                     wl.unprocessable_files.append({
-                        "relative_path": _rel(path),
+                        "relative_path": rel,
                         "reason": "pdf_encrypted",
                     })
                     continue
-                if decision.action in {"ocr_full", "ocr_pages"}:
-                    if not _has_metadata(path):
-                        wl.files_needing_ocr.append({
-                            "relative_path": _rel(path),
-                            "reason": decision.reason or decision.action,
-                        })
+                if decision.action in {"ocr_full", "ocr_pages"} and row is None:
+                    wl.files_needing_ocr.append({
+                        "relative_path": rel,
+                        "reason": decision.reason or decision.action,
+                    })
             except Exception as exc:  # noqa: BLE001
                 wl.unprocessable_files.append({
-                    "relative_path": _rel(path),
+                    "relative_path": rel,
                     "reason": f"pdf_check_failed: {exc}",
                 })
                 continue
         elif ext in {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".heic", ".heif", ".bmp", ".gif"}:
-            if not _has_metadata(path):
+            if row is None:
                 wl.files_needing_ocr.append({
-                    "relative_path": _rel(path),
+                    "relative_path": rel,
                     "reason": "image_format",
                 })
 
-        # metadata?
-        doc, summary_body, _ = sidecar_read(path)
-        if doc is None:
+        # Metadata?
+        if row is None:
             wl.files_needing_metadata.append({
-                "relative_path": _rel(path),
+                "relative_path": rel,
                 "format": ext.lstrip("."),
-                "reason": "no_sidecar",
+                "reason": "no_record",
             })
             continue
-        if doc is not None:
-            missing = _metadata_completeness(doc, summary_body)
-            if missing:
-                wl.files_with_partial_metadata.append({
-                    "relative_path": _rel(path),
-                    "missing_fields": missing,
-                })
-            stale, delta_days = _is_stale(doc, path)
-            if stale:
-                wl.files_with_stale_metadata.append({
-                    "relative_path": _rel(path),
-                    "metadata_modified": doc.metadata_modified,
-                    "file_modified": _utc_now_iso(),
-                    "delta_days": delta_days,
-                })
-            if _ocr_config_drift(doc, current_engine, current_langs):
-                wl.ocr_review_candidates.append({
-                    "relative_path": _rel(path),
-                    "previous_engine": doc.ocr.engine_version,
-                    "previous_languages": doc.ocr.languages,
-                    "current_engine": current_engine,
-                    "current_languages": current_langs,
-                })
 
-    # orphans
-    for orphan in find_orphans(walk_root):
-        wl.orphan_sidecars.append({
-            "sidecar_relative_path": str(orphan.sidecar_path.relative_to(root)).replace("\\", "/"),
-            "missing_path": orphan.described_relative_path,
-            "hash_in_sidecar": orphan.sidecar_hash,
-            "matches_in_tree": [_rel(p) for p in orphan.matches_in_tree],
+        partial = _is_partial(row)
+        if partial:
+            wl.files_with_partial_metadata.append({
+                "relative_path": rel,
+                "missing_fields": partial,
+            })
+        stale, delta_days = _is_stale(row, path)
+        if stale:
+            wl.files_with_stale_metadata.append({
+                "relative_path": rel,
+                "metadata_modified": row.get("modified"),
+                "file_modified": _utc_now_iso(),
+                "delta_days": delta_days,
+            })
+        if _ocr_drift(row, current_engine, current_langs):
+            wl.ocr_review_candidates.append({
+                "relative_path": rel,
+                "previous_engine": row.get("ocr_engine_ver"),
+                "previous_languages": row.get("ocr_langs"),
+                "current_engine": current_engine,
+                "current_languages": current_langs,
+            })
+
+    # Missing files: rows whose ``path`` doesn't resolve to a file on disk.
+    # We restrict to rows under ``walk_root`` so a sub-path scan only reports
+    # missing entries within that sub-path.
+    walk_rel_prefix = ""
+    if subpath is not None:
+        try:
+            walk_rel_prefix = str(walk_root.relative_to(root.resolve())).replace("\\", "/").rstrip("/") + "/"
+        except ValueError:
+            walk_rel_prefix = ""
+
+    for rel, row in rows_by_path.items():
+        if walk_rel_prefix and not rel.startswith(walk_rel_prefix):
+            continue
+        if rel in seen_paths:
+            continue
+        # The row exists but the file wasn't seen during the walk: either
+        # truly missing, or living in a blocked subtree. Treat it as missing
+        # for review purposes.
+        full = root / rel
+        if full.exists():
+            continue
+        wl.missing_files.append({
+            "relative_path": rel,
+            "doc_id": row["id"],
+            "hash": row.get("hash"),
+            "size": row.get("size"),
         })
-
-    # quarantined sidecars (corrupt files moved aside by sidecar.read)
-    meta_name = settings.meta_subfolder
-    for directory in iter_unblocked_directories(walk_root):
-        meta_dir = directory / meta_name
-        if not meta_dir.is_dir():
-            continue
-        for path in meta_dir.glob("*.broken-*"):
-            if not path.is_file():
-                continue
-            # the original sidecar name had ``.broken-<ts>`` appended; strip that
-            # to recover the filename it described
-            original_sidecar_name = re.sub(r"\.broken-\d{8}-\d{6}$", "", path.name)
-            described_filename = original_sidecar_name[:-3] if original_sidecar_name.endswith(".md") else original_sidecar_name
-            described_path = path.parent.parent / described_filename
-            wl.quarantined_sidecars.append({
-                "quarantine_relative_path": str(path.relative_to(root)).replace("\\", "/"),
-                "for_file": _rel(described_path),
-                "original_filename": original_sidecar_name,
-            })
 
     log.info(
         "scan complete under %s: seen=%d skipped=%d need_ocr=%d need_meta=%d "
-        "partial=%d stale=%d ocr_review=%d orphans=%d quarantined=%d unprocessable=%d",
+        "partial=%d stale=%d ocr_review=%d missing=%d unprocessable=%d",
         walk_root, wl.files_seen, wl.skipped,
         len(wl.files_needing_ocr), len(wl.files_needing_metadata),
         len(wl.files_with_partial_metadata), len(wl.files_with_stale_metadata),
-        len(wl.ocr_review_candidates), len(wl.orphan_sidecars),
-        len(wl.quarantined_sidecars), len(wl.unprocessable_files),
+        len(wl.ocr_review_candidates), len(wl.missing_files),
+        len(wl.unprocessable_files),
     )
     return wl
-
-
-def _has_metadata(path: Path) -> bool:
-    return sidecar_path_for(path).exists()
-
-
-_BUCKET_KEYS: dict[str, str] = {
-    "files_needing_ocr": "relative_path",
-    "files_needing_metadata": "relative_path",
-    "files_with_partial_metadata": "relative_path",
-    "files_with_stale_metadata": "relative_path",
-    "ocr_review_candidates": "relative_path",
-    "unprocessable_files": "relative_path",
-    "orphan_sidecars": "sidecar_relative_path",
-    "quarantined_sidecars": "quarantine_relative_path",
-}
-
-
-def _already_queued(scan_dir: Path, documents_root: str) -> dict[str, set[str]]:
-    """For each bucket, ids that already appear in a worklist for ``documents_root``."""
-    queued: dict[str, set[str]] = {b: set() for b in _BUCKET_KEYS}
-    if not scan_dir.exists():
-        return queued
-    for cand in scan_dir.glob("scan-*.json"):
-        try:
-            data = json.loads(cand.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if data.get("documents_root") != documents_root:
-            continue
-        for bucket, key in _BUCKET_KEYS.items():
-            for entry in data.get(bucket, []):
-                ident = entry.get(key)
-                if ident:
-                    queued[bucket].add(ident)
-    return queued
-
-
-def write_worklist(wl: Worklist) -> Path | None:
-    settings = get_settings()
-    settings.scan_dir.mkdir(parents=True, exist_ok=True)
-
-    queued = _already_queued(settings.scan_dir, wl.documents_root)
-    dropped = 0
-    for bucket, key in _BUCKET_KEYS.items():
-        existing = queued[bucket]
-        if not existing:
-            continue
-        bucket_list = getattr(wl, bucket)
-        before = len(bucket_list)
-        bucket_list[:] = [e for e in bucket_list if e.get(key) not in existing]
-        dropped += before - len(bucket_list)
-    if dropped:
-        log.info("scan: dropped %d entry(ies) already queued in existing worklist(s)", dropped)
-
-    if not any(getattr(wl, bucket) for bucket in _BUCKET_KEYS):
-        log.info("scan: nothing new to write — every entry is already queued")
-        return None
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    out = settings.scan_dir / f"scan-{ts}.json"
-    bump = 0
-    while out.exists():
-        bump += 1
-        out = settings.scan_dir / f"scan-{ts}-{bump}.json"
-    out.write_text(json.dumps(wl.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
-    log.info("worklist written: %s", out)
-    return out

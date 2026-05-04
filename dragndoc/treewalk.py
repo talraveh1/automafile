@@ -1,16 +1,22 @@
-"""Helpers for walking the documents tree without entering blocked subtrees."""
+"""Helpers for walking the documents tree without entering blocked subtrees.
+
+A user can drop a file literally named ``.meta`` into a directory to mark
+that whole subtree as "don't process" — useful for bundle directories or
+private folders. The marker is a *file*, not the legacy sidecar
+*directory* (which has been deleted in the DB-based layout).
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
 
-from dragndoc.config import get_settings
+
+BLOCK_MARKER_FILENAME = ".meta"
 
 
 def directory_has_blocking_meta_file(directory: Path) -> bool:
-    meta_name = get_settings().meta_subfolder
-    return (directory / meta_name).is_file()
+    return (directory / BLOCK_MARKER_FILENAME).is_file()
 
 
 def is_in_blocked_subtree(path: Path, *, stop_at: Path | None = None) -> bool:
@@ -29,16 +35,14 @@ def is_in_blocked_subtree(path: Path, *, stop_at: Path | None = None) -> bool:
 
 
 def iter_unblocked_directories(root: Path) -> Iterator[Path]:
-    meta_name = get_settings().meta_subfolder
     stack: list[Path] = [root]
 
     while stack:
         current = stack.pop()
         if current != root and current.name.startswith("."):
             continue
-        if (current / meta_name).is_file():
-            # Later we may classify and file this directory as a single unit.
-            # For now we skip the whole subtree because a `.meta` file blocks sidecar writes here.
+        if directory_has_blocking_meta_file(current):
+            # A `.meta` marker file blocks processing of this subtree entirely.
             continue
 
         yield current

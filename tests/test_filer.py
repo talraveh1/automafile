@@ -1,4 +1,4 @@
-"""Tests for the file-mover."""
+"""Tests for the filer (file move + DB row update)."""
 
 from __future__ import annotations
 
@@ -7,25 +7,30 @@ from pathlib import Path
 import pytest
 
 from dragndoc.filer import FilingProposal, TargetCollision, apply_filing, propose_filing, smart_filename
-from dragndoc.metadata import sidecar
+from dragndoc.meta_store import (
+    Doc,
+    OcrInfo,
+    get_by_file,
+    relative_to_root,
+    upsert,
+)
 from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.schema import MetadataDoc, OcrBlock
 
 
 def _seed(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
-    meta = MetadataDoc(
-        content_hash=hash_file(path),
-        file_size=path.stat().st_size,
-        filename_at_creation=path.name,
-        relative_path=str(path.name),
+    upsert(Doc(
+        path=relative_to_root(path),
+        hash=hash_file(path),
+        size=path.stat().st_size,
+        original=path.name,
         category="Personal",
         title="Notes",
         date="2026-04-01",
-        correspondent="Alice",
-        ocr=OcrBlock(decision="never"),
-    )
-    sidecar.write(path, meta, summary_body="A short summary.")
+        parties=["Alice"],
+        summary="A short summary.",
+        ocr=OcrInfo(decision="never"),
+    ))
 
 
 def test_smart_filename_uses_date_correspondent_topic():
@@ -44,7 +49,7 @@ def test_propose_filing_pulls_extension(docs_root):
     assert proposal.smart_name.endswith(".txt")
 
 
-def test_apply_filing_moves_file_and_sidecar(docs_root):
+def test_apply_filing_moves_file_and_updates_row(docs_root):
     p = docs_root / "Inbox" / "note.txt"
     _seed(p, "hello world")
     proposal = FilingProposal(
@@ -55,12 +60,10 @@ def test_apply_filing_moves_file_and_sidecar(docs_root):
     target = apply_filing(p, proposal)
     assert target.exists()
     assert not p.exists()
-    new_sidecar = sidecar.sidecar_path_for(target)
-    assert new_sidecar.exists()
-    doc, summary, _ = sidecar.read(target)
+    doc = get_by_file(target)
     assert doc is not None
-    assert doc.filed_at is not None
-    assert "moved.txt" in doc.relative_path
+    assert doc.path.endswith("moved.txt")
+    assert doc.category == "Personal"
 
 
 def test_apply_filing_idempotent_on_same_hash(docs_root):
@@ -69,7 +72,6 @@ def test_apply_filing_idempotent_on_same_hash(docs_root):
     _seed(p, "hello world")
     proposal = FilingProposal(category="Personal", subcategory=None, smart_name="moved.txt")
     apply_filing(p, proposal)
-    # second source with identical bytes: should be deduped, not raise
     p2 = docs_root / "Inbox" / "note.txt"
     _seed(p2, "hello world")
     target = apply_filing(p2, proposal)
@@ -99,13 +101,11 @@ def test_apply_filing_overwrite_replaces_target(docs_root):
     assert target.read_text(encoding="utf-8") == "second version"
 
 
-def test_apply_filing_sidecar_follows(docs_root):
+def test_subcategory_folds_into_category_path(docs_root):
     p = docs_root / "Inbox" / "note.txt"
-    _seed(p, "hello world")
-    old_sidecar = sidecar.sidecar_path_for(p)
-    assert old_sidecar.exists()
-    proposal = FilingProposal(category="Personal", subcategory=None, smart_name="moved.txt")
+    _seed(p, "hello")
+    proposal = FilingProposal(category="Personal", subcategory="2026", smart_name="moved.txt")
     target = apply_filing(p, proposal)
-    new_sidecar = sidecar.sidecar_path_for(target)
-    assert new_sidecar.exists()
-    assert not old_sidecar.exists()
+    doc = get_by_file(target)
+    assert doc is not None
+    assert doc.category == "Personal/2026"

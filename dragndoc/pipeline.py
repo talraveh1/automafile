@@ -1,4 +1,4 @@
-"""End-to-end per-file processing: extract → enrich → write metadata."""
+"""End-to-end per-file processing: extract → enrich → upsert metadata row."""
 
 from __future__ import annotations
 
@@ -17,8 +17,14 @@ from dragndoc.extractors.base import (
 )
 from dragndoc.log import get_logger
 from dragndoc.llm import enrich, EnrichmentResult
-from dragndoc.metadata import sidecar
-from dragndoc.metadata.schema import OcrBlock, utc_now_iso
+from dragndoc.meta_store import (
+    OcrInfo,
+    doc_from_enrichment,
+    relative_to_root,
+    upsert,
+    utc_now_iso,
+)
+from dragndoc.metadata.hashing import hash_file
 from dragndoc.ocr import (
     OcrDecision,
     run_ocr,
@@ -41,38 +47,36 @@ class ProcessResult:
     duration_ms: int = 0
     error: str | None = None
     enrichment: EnrichmentResult | None = None
-    sidecar_path: Path | None = None
+    doc_id: int | None = None
 
 
-def _ocr_block_for(doc: ExtractedDoc) -> OcrBlock:
+def _ocr_info_for(doc: ExtractedDoc) -> OcrInfo:
     settings = get_settings()
     if not doc.ocr_used:
-        return OcrBlock(decision=doc.ocr_decision)
-    return OcrBlock(
+        return OcrInfo(decision=doc.ocr_decision)
+    return OcrInfo(
         decision=doc.ocr_decision,
-        done_at=utc_now_iso(),
+        done=utc_now_iso(),
         engine="tesseract",
-        engine_version=tesseract_version(),
-        languages=settings.tesseract_langs,
+        engine_ver=tesseract_version(),
+        langs=[s.strip() for s in settings.tesseract_langs.replace("+", ",").split(",") if s.strip()],
     )
 
 
-def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedDoc, OcrBlock]:
+def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedDoc, OcrInfo]:
     settings = get_settings()
-    block = OcrBlock(decision=decision.action)
+    info = OcrInfo(decision=decision.action)
     if decision.action in {"no_ocr", "skip_encrypted"}:
-        return doc, block
+        return doc, info
     if not tesseract_available():
         log.warning("OCR requested for %s but Tesseract is unavailable; skipping.", doc.path)
-        block = OcrBlock(decision="ocr_unavailable")
-        return doc, block
+        return doc, OcrInfo(decision="ocr_unavailable")
     pages = decision.pages if decision.action == "ocr_pages" else None
     try:
         text = run_ocr(doc.path, langs=settings.tesseract_langs, pages=pages)
     except Exception as exc:  # noqa: BLE001
         log.error("OCR failed for %s: %s", doc.path, exc)
-        block = OcrBlock(decision="ocr_failed")
-        return doc, block
+        return doc, OcrInfo(decision="ocr_failed")
     cfg = CapConfig.from_settings(settings)
     combined = (doc.text + "\n\n" + text).strip() if doc.text else text
     doc.sections = [Section(label=None, text=trim_to_word_boundary(combined, cfg.target_chars), index=0)]
@@ -81,21 +85,20 @@ def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedD
     doc.ocr_used = True
     doc.ocr_decision = decision.action
     doc.ocr_pages = pages
-    block = OcrBlock(
+    info = OcrInfo(
         decision=decision.action,
-        done_at=utc_now_iso(),
+        done=utc_now_iso(),
         engine="tesseract",
-        engine_version=tesseract_version(),
-        languages=settings.tesseract_langs,
+        engine_ver=tesseract_version(),
+        langs=[s.strip() for s in settings.tesseract_langs.replace("+", ",").split(",") if s.strip()],
     )
-    return doc, block
+    return doc, info
 
 
 def _hints_for(doc: ExtractedDoc) -> dict:
     """Build the LLM context dict: filesystem facts + the file's own embedded
     metadata (PDF DocInfo+XMP, Office core/custom props, EXIF, HTML <meta>,
-    EPUB Dublin Core). Each populated by the extractor, already cleaned and
-    length-clipped via ``extractors._meta.collect``.
+    EPUB Dublin Core). Each populated by the extractor.
     """
     hints: dict = {
         "filename": doc.path.name,
@@ -104,8 +107,6 @@ def _hints_for(doc: ExtractedDoc) -> dict:
         "byte_size": doc.path.stat().st_size,
     }
     if doc.extracted_metadata:
-        # extractor keys (e.g. ``core_title``, ``exif_DateTimeOriginal``) are
-        # namespaced enough to not collide with the four filesystem keys above.
         hints.update(doc.extracted_metadata)
     return hints
 
@@ -126,7 +127,7 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         result.error = "blocked_by_meta_file"
         result.metadata_target = "skipped"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
-        log.info("skipping %s: ancestor directory contains file %s", path, settings.meta_subfolder)
+        log.info("skipping %s: ancestor directory contains .meta marker file", path)
         return result
 
     try:
@@ -143,21 +144,19 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         return result
     log.debug("extracted %s: format=%s text=%dchars", path, doc.format, len(doc.text or ""))
 
-    ocr_block = _ocr_block_for(doc)
-    result.ocr_decision = ocr_block.decision
+    ocr_info = _ocr_info_for(doc)
+    result.ocr_decision = ocr_info.decision
     if force_ocr:
         decision = OcrDecision(action="ocr_full", reason="forced")
         log.debug("ocr decision for %s: %s (%s)", path, decision.action, decision.reason or "-")
-        doc, ocr_block = _maybe_run_ocr(doc, decision)
-        result.ocr_decision = ocr_block.decision
+        doc, ocr_info = _maybe_run_ocr(doc, decision)
+        result.ocr_decision = ocr_info.decision
 
     log.debug("enriching %s (%d chars)", path, len(doc.text or ""))
     enrichment = enrich(doc, _hints_for(doc))
     result.enrichment = enrichment
     result.llm_tier = enrichment.tier
     result.category = enrichment.category
-
-    enrichment_dict = enrichment.as_dict()
 
     if dry_run:
         result.metadata_target = "dry_run"
@@ -168,20 +167,22 @@ def process_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) 
         )
         return result
 
-    meta_doc = sidecar.build_meta_doc_for_new_file(
+    file_hash = hash_file(path)
+    new_doc = doc_from_enrichment(
         path,
-        enrichment_dict,
-        ocr_block=ocr_block.model_dump(),
+        enrichment=enrichment.as_dict(),
+        file_hash=file_hash,
+        ocr_info=ocr_info,
+        summary=enrichment.summary,
     )
-    spath = sidecar.write(path, meta_doc, summary_body=enrichment.summary)
-    result.sidecar_path = spath
-    result.metadata_target = "sidecar"
+    result.doc_id = upsert(new_doc)
+    result.metadata_target = "db"
 
     result.duration_ms = int((time.perf_counter() - started) * 1000)
     log.info(
-        "processed %s | ocr=%s tier=%s category=%s target=%s | %dms",
+        "processed %s | ocr=%s tier=%s category=%s target=%s id=%s | %dms",
         path, result.ocr_decision, result.llm_tier, result.category,
-        result.metadata_target, result.duration_ms,
+        result.metadata_target, result.doc_id, result.duration_ms,
     )
     return result
 

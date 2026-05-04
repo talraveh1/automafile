@@ -7,9 +7,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from dragndoc.cli import app
-from dragndoc.metadata import sidecar
+from dragndoc.meta_store import Doc, OcrInfo, get_by_file, relative_to_root, upsert
 from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.schema import MetadataDoc, OcrBlock
 
 
 runner = CliRunner()
@@ -17,18 +16,18 @@ runner = CliRunner()
 
 def _seed(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
-    meta = MetadataDoc(
-        content_hash=hash_file(path),
-        file_size=path.stat().st_size,
-        filename_at_creation=path.name,
-        relative_path=str(path.name),
+    upsert(Doc(
+        path=relative_to_root(path),
+        hash=hash_file(path),
+        size=path.stat().st_size,
+        original=path.name,
         category="Personal",
-        ocr=OcrBlock(decision="never"),
-    )
-    sidecar.write(path, meta, summary_body="seeded")
+        summary="seeded",
+        ocr=OcrInfo(decision="never"),
+    ))
 
 
-def test_cp_copies_file_and_sidecar(docs_root):
+def test_cp_copies_file_and_duplicates_row(docs_root):
     src = docs_root / "Inbox" / "note.txt"
     _seed(src, "hello")
     dst_dir = docs_root / "Personal"
@@ -39,16 +38,12 @@ def test_cp_copies_file_and_sidecar(docs_root):
     assert result.exit_code == 0, result.output
     assert dst.exists()
     assert src.exists()
-    new_sidecar = sidecar.sidecar_path_for(dst)
-    old_sidecar = sidecar.sidecar_path_for(src)
-    assert new_sidecar.exists()
-    assert old_sidecar.exists()
-    doc, _, _ = sidecar.read(dst)
-    assert doc is not None
-    assert doc.relative_path.endswith("Personal/renamed.txt")
-    src_doc, _, _ = sidecar.read(src)
+    src_doc = get_by_file(src)
+    dst_doc = get_by_file(dst)
     assert src_doc is not None
-    assert src_doc.relative_path == "note.txt"
+    assert dst_doc is not None
+    assert dst_doc.path.endswith("Personal/renamed.txt")
+    assert src_doc.path == "Inbox/note.txt"
 
 
 def test_cp_into_directory_appends_basename(docs_root):
@@ -61,7 +56,7 @@ def test_cp_into_directory_appends_basename(docs_root):
     assert result.exit_code == 0, result.output
     assert (dst_dir / "note.txt").exists()
     assert src.exists()
-    assert sidecar.sidecar_path_for(dst_dir / "note.txt").exists()
+    assert get_by_file(dst_dir / "note.txt") is not None
 
 
 def test_cp_fails_when_target_exists(docs_root):
@@ -76,47 +71,29 @@ def test_cp_fails_when_target_exists(docs_root):
     assert dst.read_text(encoding="utf-8") == "squatter"
 
 
-def test_cp_fails_when_target_sidecar_exists(docs_root):
-    src = docs_root / "Inbox" / "note.txt"
-    _seed(src, "hello")
-    dst = docs_root / "elsewhere.txt"
-    sidecar_dir = dst.parent / ".meta"
-    sidecar_dir.mkdir(parents=True, exist_ok=True)
-    (sidecar_dir / f"{dst.name}.md").write_text("---\nbogus: 1\n---\n", encoding="utf-8")
-
-    result = runner.invoke(app, ["cp", str(src), str(dst)])
-    assert result.exit_code != 0
-    assert "target sidecar exists" in result.output
-    assert not dst.exists()
-
-
-def test_cp_force_overwrites_target_and_sidecar(docs_root):
+def test_cp_force_overwrites_target(docs_root):
     src = docs_root / "Inbox" / "note.txt"
     _seed(src, "fresh")
     dst = docs_root / "elsewhere.txt"
     dst.write_text("stale", encoding="utf-8")
-    sidecar_dir = dst.parent / ".meta"
-    sidecar_dir.mkdir(parents=True, exist_ok=True)
-    (sidecar_dir / f"{dst.name}.md").write_text("stale meta", encoding="utf-8")
 
     result = runner.invoke(app, ["cp", "-f", str(src), str(dst)])
     assert result.exit_code == 0, result.output
     assert dst.read_text(encoding="utf-8") == "fresh"
     assert src.exists()
-    doc, _, _ = sidecar.read(dst)
-    assert doc is not None
+    assert get_by_file(dst) is not None
 
 
-def test_cp_without_sidecar_still_copies_file(docs_root):
+def test_cp_without_row_still_copies_file(docs_root):
     src = docs_root / "Inbox" / "bare.txt"
-    src.write_text("no sidecar", encoding="utf-8")
+    src.write_text("no row", encoding="utf-8")
     dst = docs_root / "copy.txt"
 
     result = runner.invoke(app, ["cp", str(src), str(dst)])
     assert result.exit_code == 0, result.output
     assert dst.exists()
     assert src.exists()
-    assert not sidecar.sidecar_path_for(dst).exists()
+    assert get_by_file(dst) is None
 
 
 def test_cp_missing_src_errors(docs_root):

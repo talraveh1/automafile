@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dragndoc.llm import EnrichmentResult
+from dragndoc.meta_store import get_by_file
+from dragndoc.metadata.schema import OcrBlock
 from dragndoc.pipeline import process_file
 
 
@@ -21,16 +23,19 @@ _FAKE = EnrichmentResult(
 )
 
 
-def test_process_text_file_writes_sidecar(docs_root):
+def test_process_text_file_writes_row(docs_root):
     p = docs_root / "Inbox" / "note.txt"
     p.write_text("Hebrew test שלום", encoding="utf-8")
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         result = process_file(p)
     assert result.error is None
-    assert result.metadata_target == "sidecar"
-    assert result.sidecar_path is not None
-    assert result.sidecar_path.exists()
-    assert result.category == "Personal"
+    assert result.metadata_target == "db"
+    assert result.doc_id is not None
+    doc = get_by_file(p)
+    assert doc is not None
+    assert doc.category == "Personal"
+    assert "a" in doc.tags and "b" in doc.tags
+    assert doc.title == "Fake title"
 
 
 def test_process_dry_run_does_not_write(docs_root):
@@ -39,9 +44,8 @@ def test_process_dry_run_does_not_write(docs_root):
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         result = process_file(p, dry_run=True)
     assert result.metadata_target == "dry_run"
-    assert result.sidecar_path is None
-    from dragndoc.metadata import sidecar as sc
-    assert not sc.sidecar_path_for(p).exists()
+    assert result.doc_id is None
+    assert get_by_file(p) is None
 
 
 def test_process_skips_blocked_meta_tree(docs_root):
@@ -57,11 +61,11 @@ def test_process_skips_blocked_meta_tree(docs_root):
 
     assert result.error == "blocked_by_meta_file"
     assert result.metadata_target == "skipped"
-    assert result.sidecar_path is None
+    assert get_by_file(p) is None
 
 
-def test_process_pdf_writes_sidecar_only(docs_root):
-    """PDFs (like every other format) get a sidecar, never native metadata in the file."""
+def test_process_pdf_writes_row_only(docs_root):
+    """PDFs (like every other format) get a metadata row, never native metadata in the file."""
     import pikepdf
     p = docs_root / "Inbox" / "doc.pdf"
     pdf = pikepdf.new()
@@ -69,15 +73,14 @@ def test_process_pdf_writes_sidecar_only(docs_root):
     pdf.save(p)
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE), \
          patch("dragndoc.pipeline._maybe_run_ocr") as ocr:
-        from dragndoc.metadata.schema import OcrBlock
         def passthrough(doc, decision):
             doc.text = "fake text"
             return doc, OcrBlock(decision="ocr_full")
         ocr.side_effect = passthrough
         result = process_file(p)
     assert result.error is None
-    assert result.metadata_target == "sidecar"
-    assert result.sidecar_path is not None and result.sidecar_path.exists()
+    assert result.metadata_target == "db"
+    assert result.doc_id is not None
     # the PDF itself must be untouched — no XMP injected by the pipeline
     with pikepdf.open(p) as pdf2:
         with pdf2.open_metadata() as xmp:

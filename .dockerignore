@@ -1,7 +1,7 @@
 # exclude artifacts that don't belong in the build context
 .venv/
 build/
-storage/
+data/
 memory/
 .git/
 .gitignore

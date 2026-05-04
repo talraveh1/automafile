@@ -18,27 +18,15 @@ written by the `dragndoc` Python pipeline. Don't try to reuse it elsewhere.
    [memory/corrections.jsonl](../../../memory/corrections.jsonl).
 2. Use `Bash` to run `dnd doctor` and confirm Tesseract +
    Ollama are reachable. If either is missing, halt and explain.
-3. Look for the latest `storage/scan/scan-*.json`. If older than 24h or absent,
-  run `dnd scan`.
+3. Run `dnd scan --json` to get a fresh in-memory worklist. The scanner no
+   longer writes JSON to disk; the `--json` flag prints the result so you
+   can parse it directly.
 
 ## Drift / orphan review
 
-For each entry in `orphan_sidecars`, propose the hash-matched relocation if
-exactly one candidate is present. If multiple candidates, ask the user via
-`AskUserQuestion`. Apply chosen relinks via `dnd reconcile
---yes-all` (single-match) or by editing the sidecar's `relative_path` field
-manually for multi-match cases.
-
-## Quarantine review
-
-For each entry in `quarantined_sidecars` (corrupt sidecars that were moved
-aside during a previous read), ask the user via `AskUserQuestion`:
-
-- **Restore**: rename the `.broken-<ts>` file back to its original name; the
-  user fixes it manually before the next run.
-- **Discard**: delete the broken file. The next pipeline run regenerates
-  fresh metadata.
-- **Skip**: leave it; will resurface on the next scan.
+For each entry in `missing_files`, run `dnd review orphans` (which proposes
+hash-matched relinks). Pass `--yes-all` to auto-accept single-match relinks;
+multi-match cases will prompt interactively.
 
 ## Build the queue
 
@@ -48,30 +36,27 @@ as `files_needing_metadata`, `files_with_partial_metadata`, or
 
 ## For each document
 
-1. Read its sidecar metadata via `dnd inspect <path>` —
-   prints JSON for the file (or for the whole inbox when called with no
-   path). Sidecars are the only source of truth; every file the pipeline
-   has touched has one.
+1. Read its metadata row via `dnd meta get <path>` — prints JSON for one
+   file. Or `dnd meta cat <path>` for a markdown render with frontmatter.
+   The DB is the only source of truth; every file the pipeline has
+   touched has a row in `docs`.
 2. If the summary is present and ≥100 chars, use it.
-3. Otherwise run `dnd process <path>` to generate it
-   in-place.
+3. Otherwise run `dnd process <path>` to generate it.
 4. If the summary is still empty/unusable, ask the user what the document is
    about via `AskUserQuestion`.
 
-`process` over a worklist (`dnd process` with no path, or
-`process <scan-*.json>`) marks each successfully-processed entry with a
-``processed`` ISO timestamp and rewrites the worklist atomically (flush +
-fsync + rename) after every file. Subsequent runs skip entries whose
-``processed`` mark is at-or-after the file's current mtime. Pass
-``--force`` to redo everything regardless. Failed files are not marked
-and will be retried on the next run.
+`process` with no path scans the tree and processes everything that needs
+work. Each successful run sets the row's `digested` timestamp and `modified`
+field (the file's mtime at digest time). Subsequent runs skip files whose
+recorded `modified` covers the file's current mtime. Pass `--force` to redo
+everything regardless. Failed files are not marked and retry on the next run.
 
 ## Decide filing
 
-- Pick `category` from `taxonomy.md`.
+- Pick `category` from `taxonomy.md`. Use slash-separated form for nesting
+  (e.g. `Financial/Receipts`).
 - Apply rules from `preferences.md` first; corrections.jsonl precedents
   second; LLM enrichment third.
-- Pick `subcategory` only if the taxonomy lists one for this category.
 - Compose `smart_name` per `naming_convention` from preferences (default:
   `{date} - {correspondent} - {topic}.{ext}`).
 
@@ -79,23 +64,27 @@ and will be retried on the next run.
 
 Auto-apply only when ALL hold:
 
-1. `confidence == high`.
-2. `review == false`.
-3. The chosen category exists in `taxonomy.md`.
-4. The taxonomy hasn't been edited since the enrichment was generated
-   (compare file mtime of `taxonomy.md` to `metadata_modified` in the
-   sidecar).
+1. `confidence == high` (or `confirmed` if a human has signed off).
+2. The chosen category exists in `taxonomy.md`.
+3. The taxonomy hasn't been edited since the row was last digested (compare
+   file mtime of `taxonomy.md` to the row's `digested` timestamp).
 
 Otherwise, ask the user via `AskUserQuestion`.
 
 ## Apply
 
-Compute the destination path from the chosen category, optional subcategory,
-and smart filename, then run `dnd mv <src> <dst> [-f]`. It moves the file and
-its sidecar together and fails if either target exists, unless `-f`.
+Compute the destination path from the chosen category and smart filename,
+then run `dnd mv <src> <dst> [-f]`. It moves the file and updates the DB
+row's `path` together; orphaned rows can be relinked later via
+`dnd review orphans`.
 
-Never `mv` / `move` a file directly with the OS — the sidecar will be left
-behind. Always go through `dnd mv`.
+Never `mv` / `move` a file directly with the OS — the DB row will be left
+pointing at the old path. Always go through `dnd mv`.
+
+To edit a single field on a row (e.g. correct the category), use
+`dnd meta set <path> category=Financial/Receipts`. For broader edits open
+`dnd meta edit <path>` (frontmatter editor) or apply a markdown file with
+`dnd meta apply <path> <file.md>`.
 
 ## Cluster + propose new categories
 
@@ -117,9 +106,8 @@ After three similar corrections, propose a new rule for `preferences.md`.
 ## OCR review
 
 At the end of the session, walk `ocr_review_candidates` from the scan. For
-each: ask user; on yes, run `dnd review-ocr --yes-all`
-scoped to that file (or invoke directly). On no, the same command bumps
-`metadata_modified` so the file doesn't reappear.
+each: ask user; on yes, run `dnd review ocr --yes-all` scoped to that file
+(or invoke interactively).
 
 ## Wrap up
 

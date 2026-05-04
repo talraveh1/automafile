@@ -2,10 +2,9 @@
 
 A thin Python pipeline that watches a folder, extracts text + metadata from
 each file (using OCR only when needed), asks a local Ollama LLM for tags +
-category + summary, and writes that information **into the file itself**
-(native metadata) when the format supports it, or into a Markdown sidecar in
-a hidden `.meta/` subfolder otherwise. A separate Claude Code skill named
-`/triage` decides where each file is filed.
+category + summary, and stores the result in a local SQLite database
+(`data/dragndoc.db`). Original documents are never modified. A separate
+Claude Code skill named `/triage` decides where each file is filed.
 
 ## Quickstart
 
@@ -25,7 +24,7 @@ python scripts\install.py
 # start the watcher
 .\.venv\Scripts\dnd.exe watch start --fg
 
-# in a second terminal, start the toaster (renders Windows toasts from the events journal)
+# in a second terminal, start the toaster (polls the events table and renders Windows toasts)
 .\.venv\Scripts\dnd.exe toaster
 
 # optional: register the toaster as a Windows scheduled task that auto-starts at logon
@@ -68,10 +67,10 @@ and exits non-zero if the watcher dies unexpectedly so Docker can restart it.
 That same startup path is used in the VS Code devcontainer.
 
 The toaster always runs on the host (it's tiny, has no LLM/OCR dependencies,
-and needs the host's notification center). It tails
-`storage/events.jsonl` — which the containerized pipeline writes through
-the bind-mounted workspace — so toasts surface natively even when the
-pipeline lives inside the container.
+and needs the host's notification center). It polls the `events` table in
+`data/dragndoc.db` — which the containerized pipeline writes through the
+bind-mounted workspace — so toasts surface natively even when the pipeline
+lives inside the container.
 
 The container talks to the host's Ollama via `host.docker.internal:11434`
 and bind-mounts only the project workspace and the documents folder —
@@ -111,15 +110,22 @@ and the **`documents_root`** you configure. It never reaches outside.
 | `dnd watch start` | Start or resume the watcher; `--fg` runs it in the foreground. |
 | `dnd watch stop` | Pause the supervised background watcher without stopping the container. |
 | `dnd watch status` | Show whether the supervised watcher is running, stopped, or idle. |
-| `dnd toaster` | Tail the events journal and fire Windows toasts; hosts a tray icon (right-click → Triage / Log / Exit). `--no-tray` for headless. |
-| `dnd process <path>` | Process a single file once. |
-| `dnd ocr <path>` | Force OCR on a file. |
-| `dnd scan` | Walk the tree and emit a worklist. |
-| `dnd review-ocr` | Walk OCR review candidates interactively. |
-| `dnd reconcile` | Walk orphan sidecars interactively. |
-| `dnd bootstrap` | Seed config + memory + folders. |
+| `dnd watch supervise` | Container supervisor; owns the watcher process. |
+| `dnd toaster` | Poll the events table and fire Windows toasts; hosts a tray icon (right-click → Triage / Log / Exit). `--no-tray` for headless. |
+| `dnd process [path]` | Process a single file (when `path` is given) or scan the tree and process anything that needs work. |
+| `dnd ocr <path>` | Force OCR on a file and print recovered text. |
+| `dnd scan` | Walk the tree and report what `process` would do. No files are written. |
+| `dnd review ocr` | Walk OCR-drift candidates interactively. |
+| `dnd review orphans` | Walk DB rows whose file is missing; offer hash-matched relinks. |
+| `dnd grep <pattern>` | FTS5 search across `title`/`summary`/`notes`/`tags`/`parties`. |
+| `dnd meta get <path>` | JSON dump of one row. |
+| `dnd meta cat <path>` | Markdown render (frontmatter + Summary + Notes). |
+| `dnd meta set <path> field=value …` | Set one or more fields. |
+| `dnd meta apply <path> <file.md>` | Update a row from a markdown file (frontmatter+body). |
+| `dnd meta edit <path>` | Open the row's markdown in `$EDITOR`; apply on save. |
+| `dnd ls / mv / cp / rm` | DB-aware filesystem ops; `mv` updates the row's `path`. |
+| `dnd bootstrap` | Seed config + memory + folders, create the DB. |
 | `dnd doctor` | Diagnose the environment. |
-| `dnd mv <src> <dst>` | Move a file together with its sidecar; this is the filing action Claude uses after deciding the destination path. |
 
 ## Layout
 
@@ -136,12 +142,12 @@ and the **`documents_root`** you configure. It never reaches outside.
 ├── tests/                           # pytest
 ├── .claude/skills/triage/SKILL.md   # the Claude /triage skill
 ├── memory/                          # gitignored, project-local /triage memory
-├── storage/                         # gitignored, runtime
-│   ├── scan/                        # scan worklists + hash cache
+├── data/                            # gitignored, runtime; never on OneDrive
+│   ├── dragndoc.db                  # SQLite: docs · ocr · events · docs_fts · schema_meta
+│   ├── runtime/                     # watcher pid + disabled flag
 │   ├── logs/                        # rolling logs
-│   ├── tessdata/                    # optional local Tesseract trainedata
-│   ├── events.jsonl                 # append-only event journal (pipeline → toaster)
-│   └── toaster.cursor               # toaster's byte-offset bookmark into events.jsonl
+│   ├── tessdata/                    # optional local Tesseract traineddata
+│   └── toaster.cursor               # toaster's last-seen events.id
 └── build/                           # gitignored: pytest cache, coverage data
 ```
 
@@ -152,8 +158,9 @@ Files live in the user's filesystem under `<documents_root>/<inbox_dir>`
 ## OneDrive note
 
 Pin `<documents_root>\<inbox_dir>` to "Always keep on this device" before
-relying on the watcher. Sidecars are regular Markdown files in a hidden
-`.meta/` subfolder; OneDrive syncs them transparently.
+relying on the watcher. The metadata DB at `data/dragndoc.db` is local
+only — never put `data/` on OneDrive (SQLite + sync providers don't mix
+safely). Back up `data/` independently of the documents tree.
 
 ## What it doesn't do
 

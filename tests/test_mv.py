@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from typer.testing import CliRunner
 
 from dragndoc.cli import app
-from dragndoc.metadata import sidecar
+from dragndoc.meta_store import Doc, OcrInfo, get_by_file, relative_to_root, upsert
 from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.schema import MetadataDoc, OcrBlock
 
 
 runner = CliRunner()
@@ -18,18 +16,18 @@ runner = CliRunner()
 
 def _seed(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
-    meta = MetadataDoc(
-        content_hash=hash_file(path),
-        file_size=path.stat().st_size,
-        filename_at_creation=path.name,
-        relative_path=str(path.name),
+    upsert(Doc(
+        path=relative_to_root(path),
+        hash=hash_file(path),
+        size=path.stat().st_size,
+        original=path.name,
         category="Personal",
-        ocr=OcrBlock(decision="never"),
-    )
-    sidecar.write(path, meta, summary_body="seeded")
+        summary="seeded",
+        ocr=OcrInfo(decision="never"),
+    ))
 
 
-def test_mv_moves_file_and_sidecar(docs_root):
+def test_mv_moves_file_and_updates_row(docs_root):
     src = docs_root / "Inbox" / "note.txt"
     _seed(src, "hello")
     dst_dir = docs_root / "Personal"
@@ -40,12 +38,9 @@ def test_mv_moves_file_and_sidecar(docs_root):
     assert result.exit_code == 0, result.output
     assert dst.exists()
     assert not src.exists()
-    new_sidecar = sidecar.sidecar_path_for(dst)
-    assert new_sidecar.exists()
-    assert not sidecar.sidecar_path_for(src).exists()
-    doc, _, _ = sidecar.read(dst)
+    doc = get_by_file(dst)
     assert doc is not None
-    assert doc.relative_path.endswith("Personal/renamed.txt")
+    assert doc.path.endswith("Personal/renamed.txt")
 
 
 def test_mv_into_directory_appends_basename(docs_root):
@@ -57,7 +52,7 @@ def test_mv_into_directory_appends_basename(docs_root):
     result = runner.invoke(app, ["mv", str(src), str(dst_dir)])
     assert result.exit_code == 0, result.output
     assert (dst_dir / "note.txt").exists()
-    assert sidecar.sidecar_path_for(dst_dir / "note.txt").exists()
+    assert get_by_file(dst_dir / "note.txt") is not None
 
 
 def test_mv_fails_when_target_exists(docs_root):
@@ -73,42 +68,22 @@ def test_mv_fails_when_target_exists(docs_root):
     assert dst.read_text(encoding="utf-8") == "squatter"
 
 
-def test_mv_fails_when_target_sidecar_exists(docs_root):
-    src = docs_root / "Inbox" / "note.txt"
-    _seed(src, "hello")
-    dst = docs_root / "elsewhere.txt"
-    # squatting sidecar but no file
-    sidecar_dir = dst.parent / ".meta"
-    sidecar_dir.mkdir(parents=True, exist_ok=True)
-    (sidecar_dir / f"{dst.name}.md").write_text("---\nbogus: 1\n---\n", encoding="utf-8")
-
-    result = runner.invoke(app, ["mv", str(src), str(dst)])
-    assert result.exit_code != 0
-    assert "target sidecar exists" in result.output
-    assert src.exists()
-
-
-def test_mv_force_overwrites_target_and_sidecar(docs_root):
+def test_mv_force_overwrites_target(docs_root):
     src = docs_root / "Inbox" / "note.txt"
     _seed(src, "fresh")
     dst = docs_root / "elsewhere.txt"
     dst.write_text("stale", encoding="utf-8")
-    # squatting sidecar
-    sidecar_dir = dst.parent / ".meta"
-    sidecar_dir.mkdir(parents=True, exist_ok=True)
-    (sidecar_dir / f"{dst.name}.md").write_text("stale meta", encoding="utf-8")
 
     result = runner.invoke(app, ["mv", "-f", str(src), str(dst)])
     assert result.exit_code == 0, result.output
     assert dst.read_text(encoding="utf-8") == "fresh"
     assert not src.exists()
-    doc, _, _ = sidecar.read(dst)
-    assert doc is not None  # the seeded one travelled with the file
+    assert get_by_file(dst) is not None
 
 
-def test_mv_without_sidecar_still_moves_file(docs_root):
+def test_mv_without_row_still_moves_file(docs_root):
     src = docs_root / "Inbox" / "bare.txt"
-    src.write_text("no sidecar", encoding="utf-8")
+    src.write_text("no row", encoding="utf-8")
     dst = docs_root / "moved.txt"
 
     result = runner.invoke(app, ["mv", str(src), str(dst)])

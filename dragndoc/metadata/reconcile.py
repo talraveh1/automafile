@@ -1,124 +1,98 @@
-"""Find orphan sidecars and propose hash-matched relinks."""
+"""Find orphaned ``docs`` rows whose file no longer exists; suggest hash-matched relinks.
+
+An "orphan" in the DB-backed world is a row whose ``path`` doesn't resolve
+to a file on disk (typical cause: the file was moved or renamed outside
+``dnd mv``). For each orphan we check whether the same content lives at
+some other path — first by stat-size pre-filter, then by hash — and offer
+to update the row.
+"""
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from dragndoc.config import get_settings
+from dragndoc.db import connect, transaction
 from dragndoc.log import get_logger
 from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.sidecar import sidecar_path_for, read as sidecar_read
-from dragndoc.treewalk import iter_unblocked_directories, iter_unblocked_files
+from dragndoc.treewalk import iter_unblocked_files
 
 
 log = get_logger(__name__)
 
 
-CACHE_NAME = "hash-index.json"
-
-
 @dataclass
 class OrphanReport:
-    sidecar_path: Path
-    described_filename: str
-    described_relative_path: str
-    sidecar_hash: str | None
+    doc_id: int
+    recorded_path: str
+    expected_hash: str
+    expected_size: int
     matches_in_tree: list[Path] = field(default_factory=list)
 
 
-def iter_files(root: Path):
-    for path in iter_unblocked_files(root):
-        yield path
+def find_orphans(root: Path | None = None) -> list[OrphanReport]:
+    """Return rows whose ``path`` doesn't resolve to a file on disk.
 
-
-def iter_sidecars(root: Path):
-    meta_name = get_settings().meta_subfolder
-    for directory in iter_unblocked_directories(root):
-        meta_dir = directory / meta_name
-        if not meta_dir.is_dir():
-            continue
-        for path in meta_dir.glob("*.md"):
-            if path.is_file():
-                yield path
-
-
-def _load_cache(scan_dir: Path) -> dict[str, Any]:
-    cache_path = scan_dir / CACHE_NAME
-    if not cache_path.exists():
-        return {}
-    try:
-        return json.loads(cache_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _save_cache(scan_dir: Path, cache: dict[str, Any]) -> None:
-    cache_path = scan_dir / CACHE_NAME
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cache_path.with_suffix(cache_path.suffix + ".tmp")
-    tmp.write_text(json.dumps(cache, indent=2), encoding="utf-8")
-    tmp.replace(cache_path)
-
-
-def build_hash_index(root: Path) -> dict[str, list[Path]]:
-    """Return ``{sha256_hash: [path, ...]}`` for every regular file under root."""
+    For each, walk ``root`` (defaulting to ``documents_root``) and report
+    any files whose size matches the recorded ``size`` AND hash matches
+    the recorded ``hash``. The size check first lets us skip almost every
+    file in a typical tree; only size-matching candidates get hashed.
+    """
     settings = get_settings()
-    cache = _load_cache(settings.scan_dir)
-    new_cache: dict[str, dict] = {}
-    index: dict[str, list[Path]] = {}
-    hashed = 0
-    cached_hits = 0
-    for f in iter_files(root):
+    walk_root = root or settings.documents_root
+
+    with connect(readonly=True) as conn:
+        rows = conn.execute("SELECT id, path, hash, size FROM docs").fetchall()
+
+    missing: list[OrphanReport] = []
+    sizes_to_check: dict[int, list[OrphanReport]] = {}
+    for r in rows:
+        full = settings.documents_root / r["path"]
+        if full.exists():
+            continue
+        report = OrphanReport(
+            doc_id=int(r["id"]),
+            recorded_path=str(r["path"]),
+            expected_hash=str(r["hash"]),
+            expected_size=int(r["size"]),
+        )
+        missing.append(report)
+        sizes_to_check.setdefault(report.expected_size, []).append(report)
+
+    if not missing:
+        log.debug("find_orphans: no orphans under %s", walk_root)
+        return missing
+
+    # Walk once; only hash files whose size matches at least one orphan.
+    for path in iter_unblocked_files(walk_root):
         try:
-            st = f.stat()
-        except FileNotFoundError:
+            size = path.stat().st_size
+        except OSError:
             continue
-        key = str(f)
-        cached = cache.get(key)
-        if cached and cached.get("mtime_ns") == st.st_mtime_ns and cached.get("size") == st.st_size:
-            h = cached["hash"]
-            cached_hits += 1
-        else:
-            try:
-                h = hash_file(f)
-                hashed += 1
-            except Exception:
-                continue
-        new_cache[key] = {"mtime_ns": st.st_mtime_ns, "size": st.st_size, "hash": h}
-        index.setdefault(h, []).append(f)
-    _save_cache(settings.scan_dir, new_cache)
-    log.debug("hash index built under %s: %d files (%d hashed, %d cache hits)", root, hashed + cached_hits, hashed, cached_hits)
-    return index
-
-
-def find_orphans(root: Path) -> list[OrphanReport]:
-    """Identify sidecars whose target file is missing; suggest hash matches."""
-    settings = get_settings()
-    meta_name = settings.meta_subfolder
-    hash_index = build_hash_index(root)
-
-    orphans: list[OrphanReport] = []
-    for sidecar in iter_sidecars(root):
-        target_name = sidecar.name[:-3] if sidecar.name.endswith(".md") else sidecar.name
-        target_path = sidecar.parent.parent / target_name
-        if target_path.exists():
+        candidates = sizes_to_check.get(size)
+        if not candidates:
             continue
-        doc, _, _ = sidecar_read(target_path)
-        rel = doc.relative_path if doc else target_name
-        h = doc.content_hash if doc else None
-        matches = hash_index.get(h, []) if h else []
-        orphans.append(OrphanReport(
-            sidecar_path=sidecar,
-            described_filename=target_name,
-            described_relative_path=rel,
-            sidecar_hash=h,
-            matches_in_tree=list(matches),
-        ))
-    if orphans:
-        log.info("find_orphans under %s: %d orphan sidecar(s)", root, len(orphans))
-    else:
-        log.debug("find_orphans under %s: no orphans", root)
-    return orphans
+        try:
+            h = hash_file(path)
+        except OSError:
+            continue
+        for report in candidates:
+            if h == report.expected_hash:
+                report.matches_in_tree.append(path)
+
+    log.info(
+        "find_orphans: %d orphan row(s); %d had hash matches",
+        len(missing), sum(1 for r in missing if r.matches_in_tree),
+    )
+    return missing
+
+
+def relink(doc_id: int, new_path: Path) -> None:
+    """Update an orphan row to point at ``new_path`` (relative to ``documents_root``)."""
+    from dragndoc.meta_store import relative_to_root
+
+    rel = relative_to_root(new_path)
+    with transaction() as conn:
+        conn.execute("UPDATE docs SET path = ? WHERE id = ?", (rel, doc_id))
+    log.info("relinked doc id=%d -> %s", doc_id, rel)

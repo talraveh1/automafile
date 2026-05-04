@@ -13,7 +13,7 @@ from dragndoc.config import get_settings
 from dragndoc.log import get_logger
 from dragndoc.events import append as append_event
 from dragndoc.pipeline import format_result_line, process_file
-from dragndoc.treewalk import is_in_blocked_subtree
+from dragndoc.treewalk import BLOCK_MARKER_FILENAME, is_in_blocked_subtree
 
 
 log = get_logger(__name__)
@@ -44,7 +44,7 @@ class _InboxHandler(FileSystemEventHandler):
 
     def _maybe_process(self, path: Path) -> None:
         settings = get_settings()
-        if path.parent.name == settings.meta_subfolder:
+        if path.name == BLOCK_MARKER_FILENAME:
             return
         if is_in_blocked_subtree(path, stop_at=settings.documents_root):
             log.info("Skipping new file under blocked subtree: %s", path)
@@ -95,7 +95,7 @@ def run_watcher() -> None:
     """Foreground loop. Press Ctrl-C to stop."""
     settings = get_settings()
     settings.inbox_path.mkdir(parents=True, exist_ok=True)
-    settings.scan_dir.mkdir(parents=True, exist_ok=True)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
 
     handler = _InboxHandler()
     observer = PollingObserver(timeout=settings.watch_polling_interval)

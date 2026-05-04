@@ -1,10 +1,11 @@
-"""Memory template seeder + directory creation."""
+"""Memory template seeder + directory creation + DB schema bootstrap."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
 from dragndoc.config import REPO_ROOT, ensure_config_file, get_settings, reset_settings
+from dragndoc.db import bootstrap_schema
 from dragndoc.log import get_logger
 
 
@@ -62,7 +63,7 @@ the user's intent (use it whenever a name alone is ambiguous).
 
 
 def bootstrap(*, force: bool = False) -> None:
-    """Idempotent: ensure config file, storage dirs, documents tree, memory templates."""
+    """Idempotent: ensure config file, data dirs, DB schema, documents tree, memory templates."""
     # write the config file BEFORE loading settings, so the cached Settings
     # reflect what's actually on disk (matters on a fresh clone where the
     # example template differs from the in-code defaults)
@@ -73,10 +74,13 @@ def bootstrap(*, force: bool = False) -> None:
     settings = get_settings()
     repo_root = settings.repo_root
 
-    # storage + build dirs
-    settings.scan_dir.mkdir(parents=True, exist_ok=True)
+    # data + build dirs
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
     (repo_root / "build").mkdir(parents=True, exist_ok=True)
+
+    # DB: create file + schema if missing
+    bootstrap_schema(settings.db_path)
 
     # documents tree (only the inbox; category folders appear on first filing)
     settings.documents_root.mkdir(parents=True, exist_ok=True)

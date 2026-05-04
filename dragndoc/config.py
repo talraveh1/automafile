@@ -82,7 +82,6 @@ class Settings(BaseModel):
 
     documents_root: Path
     inbox_dir: str = "Inbox"
-    meta_subfolder: str = ".meta"
 
     tesseract_langs: str = "heb+eng"
     tesseract_bin: str = ""
@@ -97,8 +96,8 @@ class Settings(BaseModel):
     ocr_sparse_page_ratio: float = 0.3
     extraction: ExtractionSettings = Field(default_factory=ExtractionSettings)
 
-    storage_dir: Path
-    scan_dir: Path
+    data_dir: Path
+    db_path: Path
     logs_dir: Path
     repo_root: Path = REPO_ROOT
 
@@ -121,7 +120,6 @@ def get_settings() -> Settings:
         "ollama_model": "aya-expanse:8b",
         "documents_root": str(_DEFAULT_DOCUMENTS_ROOT),
         "inbox_dir": "Inbox",
-        "meta_subfolder": ".meta",
         "tesseract_langs": "heb+eng",
         "tesseract_bin": "",
         "tessdata_prefix": "",
@@ -131,9 +129,9 @@ def get_settings() -> Settings:
         "ocr_min_text_chars": 100,
         "ocr_min_page_chars": 50,
         "ocr_sparse_page_ratio": 0.3,
-        "storage_dir": str(REPO_ROOT / "storage"),
-        # empty = derive from storage_dir
-        "scan_dir": "",
+        "data_dir": str(REPO_ROOT / "data"),
+        # empty = derive from data_dir
+        "db_path": "",
         "logs_dir": "",
     }
     extraction_fields: dict[str, Any] = {
@@ -165,15 +163,15 @@ def get_settings() -> Settings:
             extraction_resolved[key] = default
 
     documents_root = Path(str(resolved.pop("documents_root"))).expanduser().resolve()
-    storage_dir = Path(str(resolved.pop("storage_dir"))).expanduser().resolve()
-    scan_raw = resolved.pop("scan_dir")
+    data_dir = Path(str(resolved.pop("data_dir"))).expanduser().resolve()
+    db_raw = resolved.pop("db_path")
     logs_raw = resolved.pop("logs_dir")
-    scan_dir = Path(str(scan_raw)).expanduser().resolve() if scan_raw else storage_dir / "scan"
-    logs_dir = Path(str(logs_raw)).expanduser().resolve() if logs_raw else storage_dir / "logs"
+    db_resolved = Path(str(db_raw)).expanduser().resolve() if db_raw else data_dir / "dragndoc.db"
+    logs_dir = Path(str(logs_raw)).expanduser().resolve() if logs_raw else data_dir / "logs"
     return Settings(
         documents_root=documents_root,
-        storage_dir=storage_dir,
-        scan_dir=scan_dir,
+        data_dir=data_dir,
+        db_path=db_resolved,
         logs_dir=logs_dir,
         extraction=ExtractionSettings(**extraction_resolved),
         **resolved,
@@ -183,6 +181,13 @@ def get_settings() -> Settings:
 def reset_settings() -> None:
     """Drop the cached settings; useful for tests."""
     get_settings.cache_clear()
+    # The DB bootstrap memo is keyed by absolute path; clear it so a fresh
+    # DATA_DIR (typical in tests) re-runs bootstrap against the new location.
+    try:
+        from dragndoc.db import reset_bootstrap_cache
+        reset_bootstrap_cache()
+    except ImportError:
+        pass
 
 
 def ensure_config_file() -> bool:

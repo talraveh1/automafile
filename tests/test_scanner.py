@@ -1,14 +1,24 @@
-"""Smoke tests for the tree scanner."""
+"""Smoke tests for the tree scanner (DB-backed)."""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
 
-from dragndoc.metadata import sidecar
+from dragndoc.meta_store import Doc, OcrInfo, relative_to_root, upsert
 from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.schema import MetadataDoc, OcrBlock
-from dragndoc.scanner import run_scan, write_worklist
+from dragndoc.scanner import run_scan
+
+
+def _seed_row(path: Path, **kwargs) -> None:
+    """Write a file and a metadata row pointing at it."""
+    upsert(Doc(
+        path=relative_to_root(path),
+        hash=hash_file(path),
+        size=path.stat().st_size,
+        original=path.name,
+        **kwargs,
+    ))
 
 
 def test_run_scan_on_empty_tree(docs_root):
@@ -17,7 +27,7 @@ def test_run_scan_on_empty_tree(docs_root):
     assert wl.files_needing_metadata == []
 
 
-def test_run_scan_flags_unmetadataed_text_file(docs_root):
+def test_run_scan_flags_unrowed_text_file(docs_root):
     p = docs_root / "Inbox" / "note.txt"
     p.write_text("hello world", encoding="utf-8")
     wl = run_scan()
@@ -62,7 +72,7 @@ def test_run_scan_subpath_does_not_check_parent_meta_marker(docs_root):
     assert rels == ["Inbox/bundle/nested/note.txt"]
 
 
-def test_run_scan_logs_directories_and_files_at_info(docs_root, caplog):
+def test_run_scan_logs_directories_at_info(docs_root, caplog):
     alpha = docs_root / "Inbox" / "alpha.txt"
     alpha.write_text("a", encoding="utf-8")
     nested = docs_root / "Inbox" / "nested"
@@ -76,85 +86,35 @@ def test_run_scan_logs_directories_and_files_at_info(docs_root, caplog):
     messages = [record.getMessage() for record in caplog.records if record.name == "dragndoc.scanner"]
     assert any("scan: entering" in message and str(alpha.parent) in message for message in messages)
     assert any("scan: entering" in message and str(beta.parent) in message for message in messages)
-    assert any("scan: checking" in message and str(alpha) in message for message in messages)
-    assert any("scan: checking" in message and str(beta) in message for message in messages)
-
-
-def test_run_scan_writes_worklist_file(docs_root):
-    p = docs_root / "Inbox" / "note.txt"
-    p.write_text("hello", encoding="utf-8")
-    wl = run_scan()
-    out = write_worklist(wl)
-    assert out.exists()
-    assert out.read_text(encoding="utf-8").startswith("{")
-
-
-def test_write_worklist_skips_when_everything_already_queued(docs_root):
-    p = docs_root / "Inbox" / "note.txt"
-    p.write_text("hello", encoding="utf-8")
-    first = write_worklist(run_scan())
-    assert first is not None and first.exists()
-
-    second = write_worklist(run_scan())
-    assert second is None, "second scan with no new files should not write a worklist"
-
-
-def test_write_worklist_writes_only_new_entries(docs_root):
-    a = docs_root / "Inbox" / "a.txt"
-    a.write_text("a", encoding="utf-8")
-    first = write_worklist(run_scan())
-    assert first is not None
-
-    b = docs_root / "Inbox" / "b.txt"
-    b.write_text("b", encoding="utf-8")
-    second = write_worklist(run_scan())
-    assert second is not None and second != first
-    import json as _json
-    data = _json.loads(second.read_text(encoding="utf-8"))
-    rels = [e["relative_path"] for e in data["files_needing_metadata"]]
-    assert any(r.endswith("b.txt") for r in rels)
-    assert not any(r.endswith("a.txt") for r in rels), "a.txt was already queued in the first worklist"
 
 
 def test_partial_metadata_detected(docs_root):
     p = docs_root / "Inbox" / "doc.txt"
     p.write_text("hi", encoding="utf-8")
-    meta = MetadataDoc(
-        content_hash=hash_file(p),
-        file_size=p.stat().st_size,
-        filename_at_creation=p.name,
-        relative_path="Inbox/doc.txt",
-        category="Unknown",
-        ocr=OcrBlock(decision="never"),
-    )
-    sidecar.write(p, meta, summary_body="")
+    _seed_row(p, category="Unknown", ocr=OcrInfo(decision="never"))
     wl = run_scan()
     rels = [f["relative_path"] for f in wl.files_with_partial_metadata]
     assert any("doc.txt" in r for r in rels)
 
 
 def test_ocr_review_candidates_when_engine_drifts(docs_root, monkeypatch):
-    """If a sidecar records a different engine_version/langs than current, surface for review."""
+    """If a row records a different engine_ver/langs than current, surface for review."""
     p = docs_root / "Inbox" / "scan.pdf"
-    # any bytes will do; the scanner only looks at the sidecar's recorded engine
     p.write_bytes(b"%PDF-1.4\n%fake\n")
-    meta = MetadataDoc(
-        content_hash=hash_file(p),
-        file_size=p.stat().st_size,
-        filename_at_creation=p.name,
-        relative_path="Inbox/scan.pdf",
+    _seed_row(
+        p,
         category="Personal",
         title="x",
         tags=["a"],
-        ocr=OcrBlock(
+        summary="something",
+        ocr=OcrInfo(
             decision="ocr_full",
-            done_at="2026-01-01T00:00:00Z",
+            done="2026-01-01T00:00:00Z",
             engine="tesseract",
-            engine_version="tesseract 4.1",
-            languages="eng",
+            engine_ver="tesseract 4.1",
+            langs=["eng"],
         ),
     )
-    sidecar.write(p, meta, summary_body="something")
     monkeypatch.setattr("dragndoc.scanner.tesseract_version", lambda: "tesseract 5.5.0")
     monkeypatch.setenv("TESSERACT_LANGS", "heb+eng")
     from dragndoc.config import reset_settings
@@ -164,18 +124,12 @@ def test_ocr_review_candidates_when_engine_drifts(docs_root, monkeypatch):
     assert any("scan.pdf" in r for r in rels)
 
 
-def test_quarantined_sidecars_surfaced_in_worklist(docs_root):
-    p = docs_root / "Inbox" / "broken.txt"
-    p.write_text("hello", encoding="utf-8")
-    # write a sidecar manually with malformed YAML so read() will quarantine it
-    spath = sidecar.sidecar_path_for(p)
-    spath.parent.mkdir(parents=True, exist_ok=True)
-    spath.write_text("---\nthis is: : : invalid yaml [[[\n---\nbody\n", encoding="utf-8")
-    # trigger quarantine by reading
-    sidecar.read(p)
-    # the original sidecar is now renamed; scanner should surface it
+def test_missing_files_surfaced(docs_root):
+    """A row whose file no longer exists shows up as missing."""
+    p = docs_root / "Inbox" / "gone.txt"
+    p.write_text("temporary", encoding="utf-8")
+    _seed_row(p, category="Personal", ocr=OcrInfo(decision="never"))
+    p.unlink()
     wl = run_scan()
-    assert wl.quarantined_sidecars
-    entry = wl.quarantined_sidecars[0]
-    assert "broken.txt" in entry["for_file"]
-    assert ".broken-" in entry["quarantine_relative_path"]
+    rels = [f["relative_path"] for f in wl.missing_files]
+    assert any("gone.txt" in r for r in rels)

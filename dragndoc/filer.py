@@ -1,4 +1,4 @@
-"""File-move + sidecar-move + metadata-update for the /triage skill."""
+"""File-move + DB-row update for the /triage skill."""
 
 from __future__ import annotations
 
@@ -8,15 +8,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dragndoc.config import get_settings
+from dragndoc.db import transaction
 from dragndoc.log import get_logger
+from dragndoc.meta_store import get_by_path, relative_to_root
 from dragndoc.metadata.hashing import hash_file
-from dragndoc.metadata.schema import utc_now_iso
-from dragndoc.metadata.sidecar import (
-    read as sidecar_read,
-    sidecar_path_for,
-    update_relative_path,
-    write as sidecar_write,
-)
 
 
 log = get_logger(__name__)
@@ -38,6 +33,12 @@ class FilingProposal:
             "subcategory": self.subcategory,
             "smart_name": self.smart_name,
         }
+
+    def category_path(self) -> str:
+        """The slash-separated category form: ``Cat/Sub`` or just ``Cat``."""
+        cat = (self.category or "Unknown").strip() or "Unknown"
+        sub = (self.subcategory or "").strip()
+        return f"{cat}/{sub}" if sub else cat
 
 
 _SAFE_NAME_RE = re.compile(r'[\\/:*?"<>|]')
@@ -99,14 +100,12 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
     log.info("filing %s -> %s", path, target)
 
     if target.exists() and target.resolve() != path.resolve():
-        # the outer guard already established the two paths differ; if hashes match
-        # we treat it as an idempotent re-file, otherwise it's a true collision
         existing_hash = hash_file(target)
         new_hash = hash_file(path)
         if existing_hash == new_hash:
             log.info("idempotent re-file: target hash matches; removing source %s", path)
             path.unlink()
-            _post_move_metadata(target, proposal)
+            _post_move_metadata(path, target, proposal)
             return target
         if not overwrite:
             log.warning("collision: %s exists with different content (overwrite=False)", target)
@@ -114,29 +113,34 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
         log.warning("overwriting %s with %s", target, path)
 
     shutil.move(str(path), str(target))
-    sidecar_old = sidecar_path_for(path)
-    if sidecar_old.exists():
-        update_relative_path(path, target)
-
-    _post_move_metadata(target, proposal)
+    _post_move_metadata(path, target, proposal)
     log.info("filed: %s", target)
     return target
 
 
-def _post_move_metadata(target: Path, proposal: FilingProposal) -> None:
-    settings = get_settings()
-    doc, summary, notes = sidecar_read(target)
-    if doc is None:
-        return
-    try:
-        rel = str(target.relative_to(settings.documents_root)).replace("\\", "/")
-    except ValueError:
-        rel = str(target).replace("\\", "/")
-    doc.relative_path = rel
-    doc.category = proposal.category
-    if proposal.subcategory:
-        doc.subcategory = proposal.subcategory
-    doc.filed_at = utc_now_iso()
-    doc.filed_path = rel
-    doc.metadata_modified = utc_now_iso()
-    sidecar_write(target, doc, summary, notes)
+def _post_move_metadata(old: Path, new: Path, proposal: FilingProposal) -> None:
+    """Update the row's path + category to reflect the move.
+
+    Handles three cases:
+    - Source row exists, target row doesn't: rename + categorize.
+    - Both exist (idempotent re-file or overwrite): drop the target row
+      (it referred to the displaced file) then rename source.
+    - Only target row exists (rare; source had no row): just refresh
+      the target row's category.
+    """
+    old_rel = relative_to_root(old)
+    new_rel = relative_to_root(new)
+    with transaction() as conn:
+        source = conn.execute("SELECT id FROM docs WHERE path = ?", (old_rel,)).fetchone()
+        if source is not None:
+            if old_rel != new_rel:
+                conn.execute("DELETE FROM docs WHERE path = ?", (new_rel,))
+            conn.execute(
+                "UPDATE docs SET path = ?, category = ? WHERE id = ?",
+                (new_rel, proposal.category_path(), source["id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE docs SET category = ? WHERE path = ?",
+                (proposal.category_path(), new_rel),
+            )

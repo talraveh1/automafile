@@ -39,7 +39,7 @@ class RuntimePaths:
 
 
 def runtime_paths() -> RuntimePaths:
-    state_dir = get_settings().storage_dir / "runtime"
+    state_dir = get_settings().data_dir / "runtime"
     return RuntimePaths(
         state_dir=state_dir,
         disabled_file=state_dir / "watch.disabled",
