@@ -1,3 +1,6 @@
+# temp folder
+tmp/
+
 # venv
 .venv/
 __pycache__/
