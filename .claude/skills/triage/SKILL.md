@@ -30,11 +30,14 @@ to `--all` when invoking the queue commands.
 1. Read [memory/preferences.md](../../../memory/preferences.md),
    [memory/taxonomy.md](../../../memory/taxonomy.md), and the last 50 lines of
    [memory/corrections.jsonl](../../../memory/corrections.jsonl).
-2. Use `Bash` to run `dnd doctor` and confirm Tesseract +
-   Ollama are reachable. If either is missing, halt and explain.
-3. Run `dnd triage count` (inbox-only by default). If the queue is empty
+2. Run `dnd triage count` (inbox-only by default). If the queue is empty
    but the user expects work, suggest `dnd digest` (which will populate
    the queue) or `dnd triage rebuild` (one-shot seed from existing rows).
+
+Do NOT run `dnd doctor` at startup. It only matters for commands that
+need Tesseract or Ollama (e.g. `dnd digest`). Run it lazily — just
+before such a command, and only if that command fails in a way that
+suggests a missing dependency.
 
 ## The triage queue
 
@@ -60,8 +63,10 @@ While `dnd triage count` > 0:
    `path`, `category`, `title`, `summary`, `confidence`, etc. You usually have
    everything you need without a separate `meta get` call.
 2. If the summary is empty/unusable, run `dnd digest <abs-path>` to refresh,
-   then re-pull `dnd triage next`. If still empty, ask the user via
-   `AskUserQuestion`.
+   then re-pull `dnd triage next`. If `digest` fails with what looks like
+   a missing dependency (Tesseract, Ollama, model), run `dnd doctor` to
+   diagnose and report to the user. If still empty after a successful
+   digest, ask the user via `AskUserQuestion`.
 
 3. **Decide filing.**
    - Pick `category` from `taxonomy.md`. Use slash-separated form for nesting

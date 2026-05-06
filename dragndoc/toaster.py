@@ -231,20 +231,94 @@ def _find_mintty() -> Optional[str]:
     return None
 
 
+TRIAGE_WIN_COLS = 130
+TRIAGE_WIN_ROWS = 34
+
+
+def _ensure_dpi_aware() -> None:
+    """Mark the process DPI-aware so screen-metric APIs return physical px.
+
+    Without this, on a scaled display GetSystemMetrics returns virtualized
+    (downscaled) values, but wt's ``--pos`` is interpreted in physical px —
+    so a "centered" coordinate ends up near the top-left. Idempotent.
+    """
+    try:
+        import ctypes
+
+        try:
+            # PER_MONITOR_AWARE_V2 = -4. Win10 1703+. Best fidelity.
+            if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
+                return
+        except (AttributeError, OSError):
+            pass
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR
+            return
+        except (AttributeError, OSError):
+            pass
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except (AttributeError, OSError):
+            pass
+    except Exception as exc:  # noqa: BLE001
+        log.debug("DPI awareness setup failed: %s", exc)
+
+
+def _system_dpi_scale() -> float:
+    try:
+        import ctypes
+
+        dpi = ctypes.windll.user32.GetDpiForSystem()
+        return (dpi / 96.0) if dpi else 1.0
+    except (AttributeError, OSError):
+        return 1.0
+
+
+def _work_area_px() -> Optional[tuple[int, int, int, int]]:
+    """Return (left, top, width, height) of the primary monitor's work area in physical px."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        rect = wintypes.RECT()
+        SPI_GETWORKAREA = 0x0030
+        if not ctypes.windll.user32.SystemParametersInfoW(SPI_GETWORKAREA, 0, ctypes.byref(rect), 0):
+            return None
+        return (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+    except Exception as exc:  # noqa: BLE001
+        log.debug("could not query work area: %s", exc)
+        return None
+
+
 def _launch_triage() -> None:
-    """Open a console window running triage.cmd. Prefers Windows Terminal."""
+    """Open a console window running triage.cmd, centered on screen. Prefers Windows Terminal."""
     if not TRIAGE_SCRIPT.exists():
         log.warning("Triage script not found: %s", TRIAGE_SCRIPT)
         return
+    _ensure_dpi_aware()
     wt = shutil.which("wt.exe")
     mintty = _find_mintty()
     if wt:
-        cmd = [wt, "-w", "new", "--focus", "-d", str(REPO_ROOT), "cmd.exe", "/k", str(TRIAGE_SCRIPT)]
+        scale = _system_dpi_scale()
+        # Default Cascadia Mono ~10×20 px per cell at 96 DPI; chrome ~30/100 px.
+        # wt scales font with DPI, so the actual window size scales too.
+        est_w = int((TRIAGE_WIN_COLS * 10 + 30) * scale)
+        est_h = int((TRIAGE_WIN_ROWS * 20 + 100) * scale)
+        cmd = [wt, "-w", "new", "--focus"]
+        wa = _work_area_px()
+        if wa is not None:
+            wa_l, wa_t, wa_w, wa_h = wa
+            x = wa_l + max(0, (wa_w - est_w) // 2)
+            y = wa_t + max(0, (wa_h - est_h) // 2)
+            cmd += ["--pos", f"{x},{y}"]
+            log.debug("triage center: work=%s window~=%dx%d → pos=%d,%d", wa, est_w, est_h, x, y)
+        cmd += ["--size", f"{TRIAGE_WIN_COLS},{TRIAGE_WIN_ROWS}"]
+        cmd += ["-d", str(REPO_ROOT), "cmd.exe", "/c", str(TRIAGE_SCRIPT)]
     elif mintty:
         script = str(TRIAGE_SCRIPT).replace("\\", "/")
-        cmd = [mintty, "-h", "always", "--", "cmd.exe", "/k", script]
+        cmd = [mintty, "-h", "error", "-p", "center", "--", "cmd.exe", "/c", script]
     else:
-        cmd = ["conhost.exe", "cmd.exe", "/k", str(TRIAGE_SCRIPT)]
+        cmd = ["conhost.exe", "cmd.exe", "/c", str(TRIAGE_SCRIPT)]
     try:
         subprocess.Popen(cmd, cwd=str(REPO_ROOT))
     except OSError as exc:
