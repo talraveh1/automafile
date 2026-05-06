@@ -584,11 +584,12 @@ def start_background(*, tray: bool = True) -> int:
     return 1
 
 
-def stop_toaster(*, timeout: float = 10.0) -> int:
+def stop_toaster(*, timeout: float = 10.0, quiet: bool = False) -> int:
     pid = _read_pid()
     if pid is None or not pid_alive(pid):
         _clear_pid()
-        print("toaster: not running")
+        if not quiet:
+            print("toaster: not running")
         return 0
     # The child runs as a detached pythonw.exe with no console, so
     # CTRL_BREAK can't reach it; terminate by handle instead.
@@ -601,8 +602,17 @@ def stop_toaster(*, timeout: float = 10.0) -> int:
     while time.monotonic() < deadline:
         if not pid_alive(pid):
             _clear_pid()
-            print(f"toaster stopped (pid={pid})")
+            if not quiet:
+                print(f"toaster stopped (pid={pid})")
             return 0
         time.sleep(0.1)
     print(f"toaster did not stop within {timeout:.0f}s (pid={pid})", file=sys.stderr)
     return 1
+
+
+def restart_toaster(*, tray: bool = True, timeout: float = 10.0) -> int:
+    """Stop a running toaster (if any) and start a fresh background one."""
+    rc = stop_toaster(timeout=timeout, quiet=True)
+    if rc != 0:
+        return rc
+    return start_background(tray=tray)

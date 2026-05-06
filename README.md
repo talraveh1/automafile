@@ -87,6 +87,7 @@ The pipeline only reads/writes within two paths: this **workspace folder** and t
 | `dnd watch supervise`               | Container supervisor; owns the watcher process.                              |
 | `dnd toaster start [--fg]`          | Start the toaster (background by default; `--fg` runs in this terminal).     |
 | `dnd toaster stop`                  | Stop the running toaster.                                                    |
+| `dnd toaster restart`               | Restart the running background toaster.                                      |
 | `dnd toaster status`                | Show whether the toaster is running plus install state.                      |
 | `dnd toaster install`               | Install Startup shortcut + register the AUMID for auto-start at logon.       |
 | `dnd toaster uninstall`             | Remove the Startup shortcut + unregister the AUMID.                          |

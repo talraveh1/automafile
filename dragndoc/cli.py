@@ -869,6 +869,17 @@ def toaster_stop(
     raise typer.Exit(stop_toaster(timeout=timeout))
 
 
+@toaster_app.command("restart")
+def toaster_restart(
+    timeout: Annotated[float, typer.Option("--timeout", min=0.1, help="Max seconds to wait for the toaster to exit before relaunching.")] = 10.0,
+    no_tray: Annotated[bool, typer.Option("--no-tray", help="Run headless (no tray icon). For debugging or pipes.")] = False,
+) -> None:
+    """Restart the running background toaster."""
+    log.info("CLI: toaster restart (timeout=%s no_tray=%s)", timeout, no_tray)
+    from dragndoc.toaster import restart_toaster
+    raise typer.Exit(restart_toaster(tray=not no_tray, timeout=timeout))
+
+
 @toaster_app.command("status")
 def toaster_status() -> None:
     """Show whether the toaster is running, plus install state (shortcut + AUMID)."""
