@@ -128,17 +128,21 @@ def _request_watch_start(*, fg: bool, docs: Path | None, wait: bool, timeout: fl
     typer.echo("watcher start requested")
 
 
+def _print_status(label: str, snapshot: dict) -> None:
+    """Print a one-line process status using the project's standard format."""
+    state = snapshot["state"]
+    pid = snapshot["pid"]
+    if pid is None:
+        typer.echo(f"{label}: {state}")
+    else:
+        typer.echo(f"{label}: {state} (pid={pid})")
+
+
 def _show_watch_status() -> None:
     log.info("CLI: watch status")
     from dragndoc.runtime import status_snapshot
 
-    snapshot = status_snapshot()
-    state = snapshot["state"]
-    pid = snapshot["pid"]
-    if pid is None:
-        typer.echo(f"watcher: {state}")
-        return
-    typer.echo(f"watcher: {state} (pid={pid})")
+    _print_status("watcher", status_snapshot())
 
 
 @app.callback()
@@ -484,17 +488,33 @@ _META_FRONTMATTER_FIELDS = {
 }
 
 
-@meta_app.command("get")
-def meta_get(
-    path: Annotated[Path, typer.Argument(help="File path. Looks up the row by relative path under the docs root.")],
-) -> None:
-    """JSON dump of one row (was `inspect`)."""
+def _require_doc(path: Path):
+    """Look up the metadata row for ``path``; exit 1 with a consistent error if missing."""
     from dragndoc.meta_store import get_by_file
 
     doc = get_by_file(path)
     if doc is None:
         typer.echo(f"no row for: {path}", err=True)
         raise typer.Exit(1)
+    return doc
+
+
+def _freeze_identity(new_doc, base) -> None:
+    """Force file-identity fields on ``new_doc`` to come from ``base`` (ignore frontmatter edits)."""
+    new_doc.path = base.path
+    new_doc.hash = base.hash
+    new_doc.size = base.size
+    new_doc.original = base.original = {
+    "category", "parties", "langs", "tags", "date", "title", "confidence", "summary", "notes",
+}
+
+
+@meta_app.command("get")
+def meta_get(
+    path: Annotated[Path, typer.Argument(help="File path. Looks up the row by relative path under the docs root.")],
+) -> None:
+    """JSON dump of one row (was `inspect`)."""
+    doc = _require_doc(path)
     payload = asdict(doc)  # pyright: ignore[reportArgumentType]
     typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
 
@@ -504,12 +524,9 @@ def meta_cat(
     path: Annotated[Path, typer.Argument(help="File path. Renders the row as markdown + frontmatter.")],
 ) -> None:
     """Markdown render of one row (frontmatter + Summary + Notes)."""
-    from dragndoc.meta_store import get_by_file, to_markdown
+    from dragndoc.meta_store import to_markdown
 
-    doc = get_by_file(path)
-    if doc is None:
-        typer.echo(f"no row for: {path}", err=True)
-        raise typer.Exit(1)
+    doc = _require_doc(path)
     typer.echo(to_markdown(doc), nl=False)
 
 
@@ -519,12 +536,9 @@ def meta_set(
     assignments: Annotated[list[str], typer.Argument(help="One or more `field=value` pairs.")],
 ) -> None:
     """Set one or more fields on a row. ``field=value``; lists comma-separated (e.g. `tags=tax,2025`)."""
-    from dragndoc.meta_store import get_by_file, upsert
+    from dragndoc.meta_store import upsert
 
-    doc = get_by_file(path)
-    if doc is None:
-        typer.echo(f"no row for: {path}", err=True)
-        raise typer.Exit(1)
+    doc = _require_doc(path)
 
     for assignment in assignments:
         if "=" not in assignment:
@@ -554,12 +568,9 @@ def meta_apply(
     source: Annotated[Path, typer.Argument(help="Markdown file with YAML frontmatter to apply.")],
 ) -> None:
     """Whole-doc update from a markdown + frontmatter file."""
-    from dragndoc.meta_store import doc_from_markdown, get_by_file, upsert
+    from dragndoc.meta_store import doc_from_markdown, upsert
 
-    base = get_by_file(path)
-    if base is None:
-        typer.echo(f"no row for: {path}", err=True)
-        raise typer.Exit(1)
+    base = _require_doc(path)
     if not source.exists():
         typer.echo(f"source file not found: {source}", err=True)
         raise typer.Exit(1)
@@ -570,10 +581,7 @@ def meta_apply(
     except ValueError as exc:
         typer.echo(f"could not parse: {exc}", err=True)
         raise typer.Exit(2) from None
-    new_doc.path = base.path
-    new_doc.hash = base.hash
-    new_doc.size = base.size
-    new_doc.original = base.original
+    _freeze_identity(new_doc, base)
     upsert(new_doc)
     typer.echo(f"applied: {new_doc.path}")
 
@@ -583,12 +591,9 @@ def meta_edit(
     path: Annotated[Path, typer.Argument(help="File path of the document.")],
 ) -> None:
     """Open the row's markdown in $EDITOR; apply on save."""
-    from dragndoc.meta_store import doc_from_markdown, get_by_file, to_markdown, upsert
+    from dragndoc.meta_store import doc_from_markdown, to_markdown, upsert
 
-    doc = get_by_file(path)
-    if doc is None:
-        typer.echo(f"no row for: {path}", err=True)
-        raise typer.Exit(1)
+    doc = _require_doc(path)
 
     editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or ("notepad" if sys.platform == "win32" else "vi")
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False, encoding="utf-8") as f:
@@ -603,10 +608,7 @@ def meta_edit(
         except ValueError as exc:
             typer.echo(f"could not parse edited file (left at {tmp_name}): {exc}", err=True)
             raise typer.Exit(2) from None
-        new_doc.path = doc.path
-        new_doc.hash = doc.hash
-        new_doc.size = doc.size
-        new_doc.original = doc.original
+        _freeze_identity(new_doc, doc)
         upsert(new_doc)
         typer.echo(f"applied: {new_doc.path}")
     finally:
@@ -669,17 +671,8 @@ def grep(
 # ---------------------------------------------------------------------------
 
 
-@app.command()
-def mv(
-    src: Annotated[Path, typer.Argument(help="Source file path.")],
-    dst: Annotated[Path, typer.Argument(help="Destination file path or directory.")],
-    force: Annotated[bool, typer.Option("-f", "--force", help="Overwrite the target file if it exists.")] = False,
-) -> None:
-    """Move a file. Updates the metadata row's path."""
-    import shutil as _shutil
-    from dragndoc.db import transaction
-    from dragndoc.meta_store import relative_to_root
-
+def _resolve_move_target(src: Path, dst: Path, *, force: bool) -> Path:
+    """Validate ``src`` is a file and resolve the destination for ``mv``/``cp``."""
     if not src.exists():
         typer.echo(f"src not found: {src}", err=True)
         raise typer.Exit(1)
@@ -696,6 +689,21 @@ def mv(
         raise typer.Exit(1)
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+@app.command()
+def mv(
+    src: Annotated[Path, typer.Argument(help="Source file path.")],
+    dst: Annotated[Path, typer.Argument(help="Destination file path or directory.")],
+    force: Annotated[bool, typer.Option("-f", "--force", help="Overwrite the target file if it exists.")] = False,
+) -> None:
+    """Move a file. Updates the metadata row's path."""
+    import shutil as _shutil
+    from dragndoc.db import transaction
+    from dragndoc.meta_store import relative_to_root
+
+    target = _resolve_move_target(src, dst, force=force)
     log.info("CLI: mv %s -> %s (force=%s)", src, target, force)
     src_rel = relative_to_root(src)
     _shutil.move(str(src), str(target))
@@ -715,22 +723,7 @@ def cp(
     import shutil as _shutil
     from dragndoc.meta_store import get_by_file, relative_to_root, upsert
 
-    if not src.exists():
-        typer.echo(f"src not found: {src}", err=True)
-        raise typer.Exit(1)
-    if not src.is_file():
-        typer.echo(f"src is not a file: {src}", err=True)
-        raise typer.Exit(1)
-
-    target = dst / src.name if dst.exists() and dst.is_dir() else dst
-    if target.resolve() == src.resolve():
-        typer.echo(f"src and dst are the same: {src}", err=True)
-        raise typer.Exit(1)
-    if target.exists() and not force:
-        typer.echo(f"target exists: {target} (use -f to overwrite)", err=True)
-        raise typer.Exit(1)
-
-    target.parent.mkdir(parents=True, exist_ok=True)
+    target = _resolve_move_target(src, dst, force=force)
     log.info("CLI: cp %s -> %s (force=%s)", src, target, force)
     _shutil.copy2(str(src), str(target))
     src_doc = get_by_file(src)
@@ -887,13 +880,7 @@ def toaster_status() -> None:
     log.info("CLI: toaster status")
     from dragndoc.toaster import status_snapshot
 
-    snapshot = status_snapshot()
-    state = snapshot["state"]
-    pid = snapshot["pid"]
-    if pid is None:
-        typer.echo(f"toaster: {state}")
-    else:
-        typer.echo(f"toaster: {state} (pid={pid})")
+    _print_status("toaster", status_snapshot())
 
     if sys.platform == "win32":
         from dragndoc.toaster_setup import status as setup_status
