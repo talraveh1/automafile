@@ -52,15 +52,6 @@ adds a row, every `/triage` filing removes one. You drain it via:
 **Default scope is inbox-only.** Pass `--all` only in the two reorganisation
 cases above.
 
-## Drift / orphan review
-
-For each entry in `dnd scan --json`'s `missing_files`, run `dnd review orphans`
-(which proposes hash-matched relinks). Pass `--yes-all` to auto-accept
-single-match relinks; multi-match cases will prompt interactively.
-
-NB: orphan/reconcile handling is currently being reworked; if it misbehaves,
-flag it to the user and skip — don't try to patch it inside this flow.
-
 ## Drain loop
 
 While `dnd triage count` > 0:
@@ -120,11 +111,13 @@ For every override the user makes, append a line to
 
 After three similar corrections, propose a new rule for `preferences.md`.
 
-## OCR review
+## Scope
 
-At the end of the session, run `dnd scan --json` and walk
-`ocr_review_candidates`. For each: ask user; on yes, run
-`dnd review ocr --yes-all` scoped to that file (or invoke interactively).
+Triage handles ONLY digested documents in the queue. Do NOT run
+`dnd scan` automatically — no end-of-session scan, no orphan sweep, no
+OCR review pass. Those are separate, on-demand actions: only run them
+if the user explicitly asks (e.g. "scan for orphans", "check OCR
+candidates").
 
 ## Wrap up
 
