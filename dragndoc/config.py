@@ -174,7 +174,8 @@ def _resolve_top_level(file_cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_section(name: str, file_cfg: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
-    sub = file_cfg.get(name) if isinstance(file_cfg.get(name), dict) else {}
+    raw = file_cfg.get(name)
+    sub: dict[str, Any] = raw if isinstance(raw, dict) else {}
     resolved: dict[str, Any] = {}
     for key, default in defaults.items():
         env_val = os.environ.get(f"{name.upper()}_{key.upper()}")

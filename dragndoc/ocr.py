@@ -133,12 +133,16 @@ def pdf_ocr_decision(path: Path, per_page_chars: list[int] | None = None) -> Ocr
         # verify AES keys without the `cryptography` package
         try:
             import pikepdf
-            with pikepdf.open(path):
+        except ImportError:
+            pikepdf = None
+        if pikepdf is not None:
+            try:
+                with pikepdf.open(path):
+                    pass
+            except pikepdf.PasswordError:
+                return OcrDecision(action="skip_encrypted", reason="pdf_encrypted")
+            except Exception:  # noqa: BLE001
                 pass
-        except pikepdf.PasswordError:
-            return OcrDecision(action="skip_encrypted", reason="pdf_encrypted")
-        except Exception:  # noqa: BLE001
-            pass
 
         try:
             from pypdf import PdfReader

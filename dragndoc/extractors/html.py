@@ -41,8 +41,9 @@ def extract(path: Path, *, strict: bool = False) -> ExtractedDoc:
         content = tag.get("content")
         if name and content:
             raw_meta[f"meta_{name}"] = content
-    if getattr(soup, "html", None) is not None:
-        lang = soup.html.get("lang") if hasattr(soup.html, "get") else None
+    html_tag = getattr(soup, "html", None)
+    if html_tag is not None and hasattr(html_tag, "get"):
+        lang = html_tag.get("lang")
         if lang:
             raw_meta["html_lang"] = lang
 

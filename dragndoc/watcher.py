@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from threading import Lock
@@ -36,12 +37,12 @@ class _InboxHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
             return
-        self._maybe_process(Path(event.src_path))
+        self._maybe_process(Path(os.fsdecode(event.src_path)))
 
     def on_moved(self, event):
         if event.is_directory:
             return
-        self._maybe_process(Path(event.dest_path))
+        self._maybe_process(Path(os.fsdecode(event.dest_path)))
 
     def on_modified(self, event):
         if event.is_directory:

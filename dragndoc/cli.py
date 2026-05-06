@@ -360,6 +360,7 @@ def scan(
         except Exception:  # noqa: BLE001
             ready = 0
         append_event(SCAN_FINISHED, seen=wl.files_seen if wl else 0, ready_count=ready)
+    assert wl is not None
     if print_json:
         typer.echo(json.dumps(wl.to_dict(), indent=2, ensure_ascii=False))
         return
@@ -494,7 +495,7 @@ def meta_get(
     if doc is None:
         typer.echo(f"no row for: {path}", err=True)
         raise typer.Exit(1)
-    payload = asdict(doc)
+    payload = asdict(doc)  # pyright: ignore[reportArgumentType]
     typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
 
 
@@ -928,7 +929,7 @@ def toaster_uninstall() -> None:
 
 def _triage_entry_to_dict(entry) -> dict:
     """Flatten a QueueEntry to a JSON-friendly dict including the doc fields."""
-    d = asdict(entry.doc)
+    d = asdict(entry.doc)  # pyright: ignore[reportArgumentType]
     return {
         "doc_id": entry.doc.id,
         "path": entry.doc.path,

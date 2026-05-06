@@ -477,11 +477,14 @@ def doc_from_markdown(text: str, *, base: Doc | None = None) -> Doc:
     extra_seed = front.get("extra")
     extra = extra_seed if isinstance(extra_seed, dict) else dict(seed.extra)
 
+    raw_size = front.get("size")
+    size_value = raw_size if raw_size is not None else (seed.size or 0)
+
     return Doc(
         id=seed.id,
         path=str(front.get("path") or seed.path),
         hash=str(front.get("hash") or seed.hash),
-        size=int(front.get("size") if front.get("size") is not None else seed.size or 0),
+        size=int(size_value),
         modified=front.get("modified") or seed.modified,
         digested=front.get("digested") or seed.digested,
         original=str(front.get("original") or seed.original or ""),

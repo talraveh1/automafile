@@ -11,7 +11,7 @@ from dragndoc.config import get_settings
 def _make_pdf(path: Path, page_texts: list[str]) -> None:
     from pypdf import PdfWriter
     try:
-        from reportlab.pdfgen import canvas
+        from reportlab.pdfgen import canvas  # pyright: ignore[reportMissingModuleSource]
     except ImportError:
         # fallback: write a simple PDF using pikepdf with literal text
         import pikepdf
@@ -20,7 +20,7 @@ def _make_pdf(path: Path, page_texts: list[str]) -> None:
             page = pdf.add_blank_page(page_size=(612, 792))
         pdf.save(path)
         return
-    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.pagesizes import letter  # pyright: ignore[reportMissingModuleSource]
     c = canvas.Canvas(str(path), pagesize=letter)
     for t in page_texts:
         if t:

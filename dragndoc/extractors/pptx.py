@@ -34,8 +34,9 @@ def extract(path: Path) -> ExtractedDoc:
         for slide in pres.slides:
             chunks: list[str] = []
             for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for para in shape.text_frame.paragraphs:
+                tf = getattr(shape, "text_frame", None) if shape.has_text_frame else None
+                if tf is not None:
+                    for para in tf.paragraphs:
                         line = "".join(run.text for run in para.runs)
                         if line.strip():
                             chunks.append(line)

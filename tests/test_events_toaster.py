@@ -30,17 +30,21 @@ def test_append_multiple_events_preserves_order(docs_root):
 
 
 def test_format_toast_processed():
-    title, body = _format_toast({
+    result = _format_toast({
         "kind": "processed",
         "payload": {"file": "f.pdf", "category": "Receipts", "target": "Receipts/2026-01 X.pdf"},
     })
+    assert result is not None
+    title, body = result
     assert title == "Drag'n'Doc"
     assert "f.pdf" in body
     assert "Receipts" in body
 
 
 def test_format_toast_unknown_kind_falls_through():
-    title, body = _format_toast({"kind": "weird", "payload": {"extra": "data"}})
+    result = _format_toast({"kind": "weird", "payload": {"extra": "data"}})
+    assert result is not None
+    title, body = result
     assert title == "Drag'n'Doc"
     assert "weird" in body
 
