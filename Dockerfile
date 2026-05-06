@@ -20,6 +20,7 @@ RUN apt-get update \
         curl \
         ca-certificates \
         procps \
+        tzdata \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
