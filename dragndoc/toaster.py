@@ -342,25 +342,54 @@ def _count_ready_for_triage() -> int:
 
 
 def _make_icon_image(red_dot: bool = False):
-    """Generate a 64×64 RGBA icon. ``red_dot`` overlays a small red badge
-    in the upper-right corner to indicate unhandled events."""
-    from PIL import Image, ImageDraw, ImageFont
+    """Generate a 64×64 RGBA icon: a stylized document with a folded corner
+    sitting on a blue rounded-square tile. ``red_dot`` overlays a badge in
+    the upper-right corner to indicate unhandled events."""
+    from PIL import Image, ImageDraw
 
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle((2, 2, size - 2, size - 2), radius=12, fill=(37, 99, 235, 255))
-    try:
-        font = ImageFont.truetype("arialbd.ttf", 40)
-    except OSError:
-        font = ImageFont.load_default()
-    text = "A"
-    bbox = draw.textbbox((0, 0), text, font=font)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1] - 2), text, fill=(255, 255, 255, 255), font=font)
+
+    blue = (37, 99, 235, 255)
+    paper = (255, 255, 255, 255)
+    fold_shadow = (210, 220, 240, 255)
+    text_line = (37, 99, 235, 200)
+
+    draw.rounded_rectangle((2, 2, size - 2, size - 2), radius=12, fill=blue)
+
+    # Downward "drop" arrow above the document, in white on the blue tile.
+    arrow_cx = 32
+    shaft_w = 6
+    draw.rectangle((arrow_cx - shaft_w // 2, 6, arrow_cx + shaft_w // 2, 20), fill=paper)
+    draw.polygon([(arrow_cx - 9, 18), (arrow_cx + 9, 18), (arrow_cx, 28)], fill=paper)
+
+    # Document body, sitting below the arrow. Fold in the upper-right corner.
+    doc_l, doc_t, doc_r, doc_b = 12, 30, 52, 58
+    fold = 9
+    body = [
+        (doc_l, doc_t),
+        (doc_r - fold, doc_t),
+        (doc_r, doc_t + fold),
+        (doc_r, doc_b),
+        (doc_l, doc_b),
+    ]
+    draw.polygon(body, fill=paper)
+    draw.polygon(
+        [(doc_r - fold, doc_t), (doc_r, doc_t + fold), (doc_r - fold, doc_t + fold)],
+        fill=fold_shadow,
+    )
+
+    # Text lines on the page.
+    line_h = 3
+    for i, width_ratio in enumerate((0.8, 0.6)):
+        y = doc_t + 9 + i * 8
+        x2 = doc_l + 4 + int((doc_r - doc_l - 8) * width_ratio)
+        draw.rectangle((doc_l + 4, y, x2, y + line_h), fill=text_line)
+
     if red_dot:
-        cx, cy, r = 50, 14, 11
-        draw.ellipse((cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1), fill=(255, 255, 255, 255))
+        cx, cy, r = 52, 14, 11
+        draw.ellipse((cx - r - 1, cy - r - 1, cx + r + 1, cy + r + 1), fill=paper)
         draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(220, 38, 38, 255))
     return img
 
