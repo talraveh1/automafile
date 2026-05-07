@@ -32,6 +32,32 @@ def venv_dnd(venv: Path) -> Path:
     return venv / "bin" / "dnd"
 
 
+def venv_site_packages(venv: Path) -> Path:
+    if sys.platform == "win32":
+        return venv / "Lib" / "site-packages"
+    # Resolve the lib/python3.X/site-packages path without globbing.
+    lib = venv / "lib"
+    candidates = sorted(lib.glob("python3.*/site-packages"))
+    if not candidates:
+        raise RuntimeError(f"no site-packages under {lib}")
+    return candidates[-1]
+
+
+def write_pycache_pth(venv: Path, repo: Path) -> None:
+    """Drop a .pth file that redirects bytecode caches to <repo>/build/pycache.
+
+    Lines starting with ``import`` in a .pth file are executed by site.py at
+    Python startup, before any package's ``__init__.py`` (or any conftest.py)
+    runs — so this catches even the loader's own .pyc writes that an in-code
+    ``sys.pycache_prefix`` setting cannot.
+    """
+    target = venv_site_packages(venv) / "_dragndoc_pycache.pth"
+    prefix = (repo / "build" / "pycache").resolve().as_posix()
+    line = f"import sys; sys.pycache_prefix = {prefix!r}\n"
+    target.write_text(line, encoding="utf-8")
+    print(f">> wrote {target}")
+
+
 def run(cmd: Sequence[str | Path], **kwargs) -> None:
     rendered = [str(c) for c in cmd]
     print(f">> {' '.join(rendered)}")
@@ -50,6 +76,7 @@ def main() -> int:
 
     run([py, "-m", "pip", "install", "--upgrade", "pip"])
     run([py, "-m", "pip", "install", "-e", ".[dev]"], cwd=REPO)
+    write_pycache_pth(VENV, REPO)
     run([dnd, "bootstrap"], cwd=REPO)
 
     print()
