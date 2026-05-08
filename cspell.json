@@ -144,7 +144,10 @@
     "Toolhelp",
     "SNAPPROCESS",
     "WINFUNCTYPE",
-    "windowsterminal"
+    "windowsterminal",
+    "PySide",
+    "HarfBuzz",
+    "ontop"
   ],
   "languageSettings": [
     {
