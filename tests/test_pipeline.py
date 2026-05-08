@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from dragndoc.llm import EnrichmentResult
 from dragndoc.meta_store import get_by_file
-from dragndoc.metadata.schema import OcrBlock
+from dragndoc.meta_store import OcrInfo
 from dragndoc.pipeline import digest_file
 
 
@@ -88,7 +88,7 @@ def test_digest_pdf_writes_row_only(docs_root):
          patch("dragndoc.pipeline._maybe_run_ocr") as ocr:
         def passthrough(doc, decision):
             doc.text = "fake text"
-            return doc, OcrBlock(decision="ocr_full")
+            return doc, OcrInfo(decision="ocr_full")
         ocr.side_effect = passthrough
         result = digest_file(p)
     assert result.error is None

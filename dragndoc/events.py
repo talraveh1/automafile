@@ -9,18 +9,14 @@ holds the highest event id the toaster has consumed.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
 
 from dragndoc.db import transaction
 from dragndoc.log import get_logger
+from dragndoc.meta_store import utc_now_iso_micro
 
 
 log = get_logger(__name__)
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 def append(kind: str, **fields: Any) -> None:
@@ -30,7 +26,7 @@ def append(kind: str, **fields: Any) -> None:
         with transaction() as conn:
             conn.execute(
                 "INSERT INTO events (ts, kind, payload) VALUES (?, ?, ?)",
-                (_utc_now_iso(), kind, payload),
+                (utc_now_iso_micro(), kind, payload),
             )
     except Exception as exc:  # noqa: BLE001
         log.warning("events.append failed (%s): %s", kind, exc)

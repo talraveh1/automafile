@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from dragndoc.config import get_settings
 from dragndoc.db import transaction
-from dragndoc.meta_store import Doc, _recompute_dups_for_hashes, _row_to_doc, relative_to_root
+from dragndoc.meta_store import (
+    Doc,
+    _recompute_dups_for_hashes,
+    _row_to_doc,
+    file_modified_iso,
+    relative_to_root,
+)
 from dragndoc.metadata.hashing import hash_file
 
 
@@ -41,14 +46,6 @@ class NoChange:
 
 
 ReconcileOutcome = Renamed | ContentChanged | NewFile | NoChange
-
-
-def file_modified_iso(path: Path) -> str | None:
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _full_path(rel: str) -> Path:

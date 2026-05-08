@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from dragndoc.config import get_settings
 from dragndoc.db import connect, transaction
 from dragndoc.log import get_logger
-from dragndoc.meta_store import _recompute_dups_for_hashes, relative_to_root
+from dragndoc.meta_store import (
+    _recompute_dups_for_hashes,
+    file_modified_iso,
+    relative_to_root,
+    utc_now_iso,
+)
 from dragndoc.metadata.hashing import hash_file
 from dragndoc.ocr import pdf_ocr_decision
-from dragndoc.scanner.reconcile import file_modified_iso, resolve_path_conflict
+from dragndoc.scanner.reconcile import resolve_path_conflict
 from dragndoc.scanner.worklist import (
     DigestCandidate,
     MergeRecord,
@@ -56,10 +61,6 @@ class RenamePlan:
     old_row: sqlite3.Row
     new_row: sqlite3.Row | None
     file_hash: str
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _index_existing_rows() -> dict[str, sqlite3.Row]:
@@ -567,7 +568,7 @@ def run_scan(
     )
     worklist.unprocessable.extend(unprocessable)
     scan_report = ScanReport(
-        ran_at=_utc_now_iso(),
+        ran_at=utc_now_iso(),
         docs_root=str(root),
         files_seen=files_seen,
         skipped=skipped,

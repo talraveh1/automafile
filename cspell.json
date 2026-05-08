@@ -121,6 +121,7 @@
     "yscrollcommand",
     "crdownload",
     "dedup",
+    "dups",
     "idempotently",
     "relinks",
     "renameable",

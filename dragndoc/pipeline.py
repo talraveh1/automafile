@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from dragndoc.config import get_settings
@@ -21,8 +20,8 @@ from dragndoc.llm import enrich, EnrichmentResult
 from dragndoc.meta_store import (
     OcrInfo,
     doc_from_enrichment,
+    file_modified_iso,
     get_by_file,
-    relative_to_root,
     upsert,
     utc_now_iso,
 )
@@ -52,14 +51,6 @@ class DigestResult:
     doc_id: int | None = None
 
 
-def _file_modified_iso(path: Path) -> str | None:
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
 def _assert_expected_file_facts(
     path: Path,
     *,
@@ -67,7 +58,7 @@ def _assert_expected_file_facts(
     expected_mtime: str | None,
 ) -> tuple[int, str | None]:
     st = path.stat()
-    modified = _file_modified_iso(path)
+    modified = file_modified_iso(path)
     if expected_size is not None and st.st_size != expected_size:
         raise ValueError(f"file size changed while digesting {path}: expected {expected_size}, got {st.st_size}")
     if expected_mtime is not None and modified != expected_mtime:
@@ -75,12 +66,11 @@ def _assert_expected_file_facts(
     return st.st_size, modified
 
 
-def _ocr_info_for(doc: ExtractedDoc) -> OcrInfo:
+def _completed_ocr_info(decision_action: str) -> OcrInfo:
+    """OcrInfo for a completed Tesseract run."""
     settings = get_settings()
-    if not doc.ocr_used:
-        return OcrInfo(decision=doc.ocr_decision)
     return OcrInfo(
-        decision=doc.ocr_decision,
+        decision=decision_action,
         done=utc_now_iso(),
         engine="tesseract",
         engine_ver=tesseract_version(),
@@ -90,9 +80,8 @@ def _ocr_info_for(doc: ExtractedDoc) -> OcrInfo:
 
 def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedDoc, OcrInfo]:
     settings = get_settings()
-    info = OcrInfo(decision=decision.action)
     if decision.action in {"no_ocr", "skip_encrypted"}:
-        return doc, info
+        return doc, OcrInfo(decision=decision.action)
     if not tesseract_available():
         log.warning("OCR requested for %s but Tesseract is unavailable; skipping.", doc.path)
         return doc, OcrInfo(decision="ocr_unavailable")
@@ -110,14 +99,7 @@ def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedD
     doc.ocr_used = True
     doc.ocr_decision = decision.action
     doc.ocr_pages = pages
-    info = OcrInfo(
-        decision=decision.action,
-        done=utc_now_iso(),
-        engine="tesseract",
-        engine_ver=tesseract_version(),
-        langs=[s.strip() for s in settings.tesseract.langs.replace("+", ",").split(",") if s.strip()],
-    )
-    return doc, info
+    return doc, _completed_ocr_info(decision.action)
 
 
 def _hints_for(doc: ExtractedDoc) -> dict:
@@ -177,7 +159,7 @@ def digest_file(
         return result
     log.debug("extracted %s: format=%s text=%dchars", path, doc.format, len(doc.text or ""))
 
-    ocr_info = _ocr_info_for(doc)
+    ocr_info = _completed_ocr_info(doc.ocr_decision) if doc.ocr_used else OcrInfo(decision=doc.ocr_decision)
     result.ocr_decision = ocr_info.decision
     if force_ocr:
         decision = OcrDecision(action="ocr_full", reason="forced")

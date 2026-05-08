@@ -46,9 +46,7 @@ _SAFE_NAME_RE = re.compile(r'[\\/:*?"<>|]')
 
 def slugify(value: str) -> str:
     """Conservative filename sanitizer; keeps Hebrew, strips disallowed Windows chars."""
-    if value is None:
-        return ""
-    cleaned = _SAFE_NAME_RE.sub(" ", str(value))
+    cleaned = _SAFE_NAME_RE.sub(" ", value)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned[:120]
 

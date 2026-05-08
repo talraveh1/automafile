@@ -29,7 +29,7 @@ log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Time helper
+# Time / file helpers
 # ---------------------------------------------------------------------------
 
 
@@ -39,6 +39,14 @@ def utc_now_iso() -> str:
 
 def utc_now_iso_micro() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def file_modified_iso(path: Path) -> str | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 # ---------------------------------------------------------------------------
@@ -456,14 +464,6 @@ ON CONFLICT(doc_id) DO UPDATE SET
 # ---------------------------------------------------------------------------
 
 
-def _file_modified_iso(path: Path) -> str | None:
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
 def _category_with_subcategory(category: str | None, subcategory: str | None) -> str:
     cat = (category or "Unknown").strip() or "Unknown"
     sub = (subcategory or "").strip()
@@ -512,7 +512,7 @@ def doc_from_enrichment(
         path=relative_to_root(path),
         hash=file_hash,
         size=st.st_size,
-        modified=_file_modified_iso(path),
+        modified=file_modified_iso(path),
         digested=utc_now_iso_micro(),
         original=path.name,
         category=_category_with_subcategory(enrichment.get("category"), enrichment.get("subcategory")),
