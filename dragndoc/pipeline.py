@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dragndoc.config import get_settings
@@ -20,6 +21,7 @@ from dragndoc.llm import enrich, EnrichmentResult
 from dragndoc.meta_store import (
     OcrInfo,
     doc_from_enrichment,
+    get_by_file,
     relative_to_root,
     upsert,
     utc_now_iso,
@@ -48,6 +50,29 @@ class DigestResult:
     error: str | None = None
     enrichment: EnrichmentResult | None = None
     doc_id: int | None = None
+
+
+def _file_modified_iso(path: Path) -> str | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return datetime.fromtimestamp(st.st_mtime, tz=timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _assert_expected_file_facts(
+    path: Path,
+    *,
+    expected_size: int | None,
+    expected_mtime: str | None,
+) -> tuple[int, str | None]:
+    st = path.stat()
+    modified = _file_modified_iso(path)
+    if expected_size is not None and st.st_size != expected_size:
+        raise ValueError(f"file size changed while digesting {path}: expected {expected_size}, got {st.st_size}")
+    if expected_mtime is not None and modified != expected_mtime:
+        raise ValueError(f"file mtime changed while digesting {path}: expected {expected_mtime}, got {modified}")
+    return st.st_size, modified
 
 
 def _ocr_info_for(doc: ExtractedDoc) -> OcrInfo:
@@ -111,7 +136,15 @@ def _hints_for(doc: ExtractedDoc) -> dict:
     return hints
 
 
-def digest_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -> DigestResult:
+def digest_file(
+    path: Path,
+    *,
+    dry_run: bool = False,
+    force_ocr: bool = False,
+    file_hash: str | None = None,
+    expected_size: int | None = None,
+    expected_mtime: str | None = None,
+) -> DigestResult:
     started = time.perf_counter()
     settings = get_settings()
     result = DigestResult(path=path)
@@ -158,6 +191,10 @@ def digest_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -
     result.llm_tier = enrichment.tier
     result.category = enrichment.category
 
+    if file_hash is None:
+        file_hash = hash_file(path)
+    _assert_expected_file_facts(path, expected_size=expected_size, expected_mtime=expected_mtime)
+
     if dry_run:
         result.metadata_target = "dry_run"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
@@ -167,7 +204,6 @@ def digest_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -
         )
         return result
 
-    file_hash = hash_file(path)
     new_doc = doc_from_enrichment(
         path,
         enrichment=enrichment.as_dict(),
@@ -175,15 +211,18 @@ def digest_file(path: Path, *, dry_run: bool = False, force_ocr: bool = False) -
         ocr_info=ocr_info,
         summary=enrichment.summary,
     )
+    existing = get_by_file(path)
+    if existing is not None:
+        new_doc.dup = existing.dup
     result.doc_id = upsert(new_doc)
     result.metadata_target = "db"
 
-    from dragndoc.triage_queue import enqueue as triage_enqueue
+    from dragndoc.triage import enqueue as triage_enqueue
 
     try:
         triage_enqueue(result.doc_id, reason="digested")
     except Exception as exc:  # noqa: BLE001
-        log.warning("triage_queue enqueue failed for %s: %s", path, exc)
+        log.warning("triage enqueue failed for %s: %s", path, exc)
 
     result.duration_ms = int((time.perf_counter() - started) * 1000)
     log.info(

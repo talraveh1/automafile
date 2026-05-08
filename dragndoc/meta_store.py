@@ -47,6 +47,7 @@ def utc_now_iso_micro() -> str:
 
 
 CONFIDENCE_LEVELS = ("low", "medium", "high", "confirmed")
+DUP_VALUES = {"unique", "dup", "keep"}
 
 
 @dataclass
@@ -87,6 +88,7 @@ class Doc:
     date: str | None = None
     title: str | None = None
     confidence: str = "low"
+    dup: str = "unique"
     summary: str = ""
     notes: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
@@ -110,13 +112,60 @@ class Doc:
             "date": self.date,
             "title": self.title,
             "confidence": self.confidence if self.confidence in CONFIDENCE_LEVELS else "low",
+            "dup": self.dup if self.dup in DUP_VALUES else "unique",
             "summary": self.summary or "",
             "notes": self.notes or "",
             "extra": json.dumps(self.extra or {}, ensure_ascii=False),
         }
 
+    def to_dict(self, *, include_duplicates: bool = True) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "path": self.path,
+            "hash": self.hash,
+            "size": self.size,
+            "modified": self.modified,
+            "digested": self.digested,
+            "original": self.original,
+            "category": self.category,
+            "parties": list(self.parties),
+            "langs": list(self.langs),
+            "tags": list(self.tags),
+            "date": self.date,
+            "title": self.title,
+            "confidence": self.confidence,
+            "dup": self.dup,
+            "summary": self.summary,
+            "notes": self.notes,
+            "extra": dict(self.extra),
+            "ocr": {
+                "decision": self.ocr.decision,
+                "done": self.ocr.done,
+                "engine": self.ocr.engine,
+                "engine_ver": self.ocr.engine_ver,
+                "langs": list(self.ocr.langs),
+            },
+        }
+        if include_duplicates and self.hash:
+            unapproved, approved = _duplicate_lists_for(self)
+            if unapproved:
+                payload["duplicates_unapproved"] = unapproved
+            if approved:
+                payload["duplicates_approved"] = approved
+        return payload
+
+
+@dataclass
+class SetDupResult:
+    path: str
+    requested_value: str
+    final_value: str
+    siblings_changed: list[str] = field(default_factory=list)
+    inbox_deferred: list[str] = field(default_factory=list)
+
 
 def _row_to_doc(row: sqlite3.Row) -> Doc:
+    keys = row.keys()
     doc = Doc(
         id=row["id"],
         path=row["path"],
@@ -132,11 +181,11 @@ def _row_to_doc(row: sqlite3.Row) -> Doc:
         date=row["date"],
         title=row["title"],
         confidence=row["confidence"],
+        dup=row["dup"] if "dup" in keys else "unique",
         summary=row["summary"],
         notes=row["notes"],
         extra=_parse_json(row["extra"]),
     )
-    keys = row.keys()
     if "ocr_decision" in keys and row["ocr_decision"] is not None:
         doc.ocr = OcrInfo(
             decision=row["ocr_decision"] or "",
@@ -190,7 +239,7 @@ def get_by_file(file_path: Path) -> Doc | None:
     return get_by_path(relative_to_root(file_path))
 
 
-def get_by_hash(hash_value: str) -> list[Doc]:
+def get_hash(hash_value: str) -> list[Doc]:
     with connect(readonly=True) as conn:
         rows = conn.execute("SELECT * FROM docs_full WHERE hash = ?", (hash_value,)).fetchall()
     return [_row_to_doc(r) for r in rows]
@@ -248,13 +297,124 @@ def has_metadata(file_path: Path) -> bool:
     return row is not None
 
 
+def is_in_inbox(rel: str) -> bool:
+    prefix = get_settings().inbox.rstrip("/") + "/"
+    return rel.startswith(prefix)
+
+
+def _duplicate_lists_for(doc: Doc) -> tuple[list[str], list[str]]:
+    if doc.id is None or not doc.hash:
+        return [], []
+    with connect(readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT path, dup FROM docs WHERE hash = ? AND id != ? ORDER BY path",
+            (doc.hash, doc.id),
+        ).fetchall()
+    unapproved = [r["path"] for r in rows if r["dup"] == "dup"]
+    approved = [r["path"] for r in rows if r["dup"] == "keep"]
+    return unapproved, approved
+
+
+def _get_by_path(conn: sqlite3.Connection, rel_path: str) -> Doc | None:
+    row = conn.execute("SELECT * FROM docs_full WHERE path = ?", (rel_path,)).fetchone()
+    return _row_to_doc(row) if row else None
+
+
+def _get_by_hash_excluding(conn: sqlite3.Connection, hash_value: str, doc_id: int) -> list[Doc]:
+    rows = conn.execute(
+        "SELECT * FROM docs_full WHERE hash = ? AND id != ? ORDER BY path",
+        (hash_value, doc_id),
+    ).fetchall()
+    return [_row_to_doc(row) for row in rows]
+
+
+def _update_dup(conn: sqlite3.Connection, doc_id: int, value: str) -> None:
+    conn.execute("UPDATE docs SET dup = ? WHERE id = ?", (value, doc_id))
+
+
+def _hashes_needing_dup_recompute(conn: sqlite3.Connection) -> list[str]:
+    rows = conn.execute(
+        "SELECT hash FROM docs GROUP BY hash HAVING COUNT(*) >= 2 "
+        "UNION "
+        "SELECT hash FROM docs WHERE dup != 'unique' GROUP BY hash"
+    ).fetchall()
+    return [str(row["hash"]) for row in rows if row["hash"]]
+
+
+def _recompute_dups_for_hashes(conn: sqlite3.Connection, hashes: Iterable[str]) -> int:
+    changed = 0
+    for hash_value in sorted({h for h in hashes if h}):
+        rows = conn.execute(
+            "SELECT id, dup FROM docs WHERE hash = ? ORDER BY id",
+            (hash_value,),
+        ).fetchall()
+        if len(rows) == 1:
+            if rows[0]["dup"] != "unique":
+                conn.execute("UPDATE docs SET dup = 'unique' WHERE id = ?", (rows[0]["id"],))
+                changed += 1
+            continue
+        if len(rows) >= 2:
+            ids = [row["id"] for row in rows if row["dup"] == "unique"]
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                conn.execute(f"UPDATE docs SET dup = 'dup' WHERE id IN ({placeholders})", ids)
+                changed += len(ids)
+    return changed
+
+
+def _recompute_dups(conn: sqlite3.Connection) -> int:
+    return _recompute_dups_for_hashes(conn, _hashes_needing_dup_recompute(conn))
+
+
+def recompute_dups() -> int:
+    with transaction() as conn:
+        return _recompute_dups(conn)
+
+
+def recompute_dups_for_hashes(hashes: Iterable[str]) -> int:
+    with transaction() as conn:
+        return _recompute_dups_for_hashes(conn, hashes)
+
+
+def set_dup(path: Path, value: str) -> SetDupResult:
+    """Set ``dup`` for a row and its non-inbox siblings, then restore I1."""
+    if value not in DUP_VALUES:
+        raise ValueError(f"invalid dup value: {value}")
+    rel = relative_to_root(path)
+    siblings_changed: list[str] = []
+    inbox_deferred: list[str] = []
+    with transaction() as conn:
+        target = _get_by_path(conn, rel)
+        if target is None or target.id is None:
+            raise ValueError(f"no row for: {path}")
+        _update_dup(conn, target.id, value)
+        siblings = _get_by_hash_excluding(conn, target.hash, target.id)
+        for sibling in siblings:
+            if sibling.id is None:
+                continue
+            if is_in_inbox(sibling.path):
+                inbox_deferred.append(sibling.path)
+                continue
+            _update_dup(conn, sibling.id, value)
+            siblings_changed.append(sibling.path)
+        _recompute_dups_for_hashes(conn, [target.hash])
+        refreshed = _get_by_path(conn, rel)
+    return SetDupResult(
+        path=rel,
+        requested_value=value,
+        final_value=refreshed.dup if refreshed else value,
+        siblings_changed=siblings_changed,
+        inbox_deferred=inbox_deferred,
+    )
+
+
 _INSERT_DOC_SQL = """
 INSERT INTO docs (
     path, hash, size, modified, digested, original, category,
-    parties, langs, tags, date, title, confidence, summary, notes, extra
+    parties, langs, tags, date, title, confidence, dup, summary, notes, extra
 ) VALUES (
     :path, :hash, :size, :modified, :digested, :original, :category,
-    :parties, :langs, :tags, :date, :title, :confidence, :summary, :notes, :extra
+    :parties, :langs, :tags, :date, :title, :confidence, :dup, :summary, :notes, :extra
 )
 """
 
@@ -272,6 +432,7 @@ UPDATE docs SET
     date = :date,
     title = :title,
     confidence = :confidence,
+    dup = :dup,
     summary = :summary,
     notes = :notes,
     extra = :extra
@@ -378,6 +539,11 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
 def to_markdown(doc: Doc) -> str:
     """Render a :class:`Doc` to YAML-frontmatter + Summary/Notes sections."""
+    duplicate_fields = {
+        key: value
+        for key, value in doc.to_dict(include_duplicates=True).items()
+        if key in {"duplicates_unapproved", "duplicates_approved"}
+    }
     front = {
         "path": doc.path,
         "hash": doc.hash,
@@ -392,6 +558,8 @@ def to_markdown(doc: Doc) -> str:
         "date": doc.date,
         "title": doc.title,
         "confidence": doc.confidence,
+        "dup": doc.dup,
+        **duplicate_fields,
     }
     if not doc.ocr.is_unset():
         front["ocr"] = {
@@ -495,6 +663,7 @@ def doc_from_markdown(text: str, *, base: Doc | None = None) -> Doc:
         date=front.get("date") or seed.date,
         title=front.get("title") or seed.title,
         confidence=str(front.get("confidence") or seed.confidence or "low"),
+        dup=str(front.get("dup") or seed.dup or "unique"),
         summary=summary or seed.summary,
         notes=notes or seed.notes,
         extra=extra,

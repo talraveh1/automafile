@@ -33,7 +33,7 @@ def triage_count_cmd(
     all_: Annotated[bool, typer.Option("--all", help="Count everything in the queue, not just inbox files.")] = False,
 ) -> None:
     """Print the number of files awaiting triage."""
-    from dragndoc.triage_queue import count as q_count
+    from dragndoc.triage import count as q_count
 
     typer.echo(str(q_count(inbox_only=not all_)))
 
@@ -44,7 +44,7 @@ def triage_list_cmd(
     print_json: Annotated[bool, typer.Option("--json", help="Print full queue as JSON.")] = False,
 ) -> None:
     """List files awaiting triage, oldest first."""
-    from dragndoc.triage_queue import list_queue
+    from dragndoc.triage import list_queue
 
     entries = list_queue(inbox_only=not all_)
     if print_json:
@@ -63,7 +63,7 @@ def triage_next_cmd(
     print_json: Annotated[bool, typer.Option("--json/--no-json", help="Print full doc + queue metadata as JSON (default). Use --no-json for a one-line summary.")] = True,
 ) -> None:
     """Peek at the next item to triage. Does NOT remove it; call `dnd triage done` after filing."""
-    from dragndoc.triage_queue import next_entry
+    from dragndoc.triage import next_entry
 
     entry = next_entry(inbox_only=not all_)
     if entry is None:
@@ -84,7 +84,7 @@ def triage_done_cmd(
 ) -> None:
     """Remove a file from the triage queue (call after filing it)."""
     from dragndoc.meta_store import relative_to_root
-    from dragndoc.triage_queue import dequeue_by_path
+    from dragndoc.triage import dequeue_by_path
 
     rel = relative_to_root(path)
     removed = dequeue_by_path(rel)
@@ -100,7 +100,7 @@ def triage_rebuild_cmd(
     all_: Annotated[bool, typer.Option("--all", help="Seed from every doc, not just inbox files.")] = False,
 ) -> None:
     """Seed the queue from existing docs that aren't already queued. One-shot migration aid."""
-    from dragndoc.triage_queue import rebuild_from_existing_docs
+    from dragndoc.triage import rebuild_from_existing_docs
 
     n = rebuild_from_existing_docs(inbox_only=not all_)
     typer.echo(f"enqueued: {n}")
@@ -112,7 +112,7 @@ def triage_clear_cmd(
     yes: Annotated[bool, typer.Option("-y", "--yes", help="Skip confirmation prompt.")] = False,
 ) -> None:
     """Empty the triage queue (default scope: inbox only)."""
-    from dragndoc.triage_queue import clear, count as q_count
+    from dragndoc.triage import clear, count as q_count
 
     n = q_count(inbox_only=not all_)
     if n == 0:

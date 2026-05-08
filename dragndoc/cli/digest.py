@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -29,14 +28,25 @@ def digest(
     from dragndoc.config import get_settings
     from dragndoc.events import DIGEST_FINISHED, DIGEST_STARTED, append as append_event
     from dragndoc.pipeline import digest_file, format_result_line
-    from dragndoc.triage_queue import count as triage_count
+    from dragndoc.triage import count as triage_count
 
     settings = get_settings()
     if path is not None:
+        from dragndoc.meta_store import get_by_file, recompute_dups_for_hashes
+        from dragndoc.metadata.hashing import hash_file
+
         log.info("CLI: digest %s (dry_run=%s force_ocr=%s)", path, dry_run, force_ocr)
         append_event(DIGEST_STARTED, scope="file", file=path.name)
-        result = digest_file(path, dry_run=dry_run, force_ocr=force_ocr)
-        typer.echo(format_result_line(result))
+        old = get_by_file(path)
+        old_hash = old.hash if old else None
+        file_hash = hash_file(path) if path.exists() and path.is_file() else None
+        result = digest_file(path, dry_run=dry_run, force_ocr=force_ocr, file_hash=file_hash)
+        if not dry_run and file_hash:
+            recompute_dups_for_hashes({h for h in (old_hash, file_hash) if h})
+        line = format_result_line(result)
+        typer.echo(line)
+        if result.error:
+            log.error("%s", line)
         append_event(
             DIGEST_FINISHED,
             scope="file",
@@ -53,104 +63,63 @@ def digest(
     _digest_tree(settings, dry_run=dry_run, force_ocr=force_ocr, force=force, stop_on_error=stop_on_error)
 
 
-def _is_digested_fresh(rel: str, file_path: Path) -> bool:
-    """True if the row's ``modified`` covers the file's current mtime."""
-    from dragndoc.db import connect
-
-    with connect(readonly=True) as conn:
-        row = conn.execute(
-            "SELECT digested, modified FROM docs WHERE path = ?", (rel,)
-        ).fetchone()
-    if row is None:
-        return False
-    if not row["digested"] or not row["modified"]:
-        return False
-    try:
-        file_mt = datetime.fromtimestamp(file_path.stat().st_mtime, tz=timezone.utc)
-    except FileNotFoundError:
-        return False
-    try:
-        recorded_mt = datetime.fromisoformat(str(row["modified"]).replace("Z", "+00:00"))
-    except ValueError:
-        return False
-    return file_mt <= recorded_mt
-
-
 def _digest_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_on_error: bool) -> None:
     from dragndoc.events import DIGEST_FINISHED, DIGEST_STARTED, append as append_event
     from dragndoc.pipeline import digest_file, format_result_line
     from dragndoc.scanner import run_scan
-    from dragndoc.triage_queue import count as triage_count
+    from dragndoc.triage import count as triage_count
+    from dragndoc.meta_store import recompute_dups
 
     log.info("CLI: digest tree (dry_run=%s force_ocr=%s force=%s)", dry_run, force_ocr, force)
-    wl = run_scan()
-    candidates: list[str] = []
-    seen: set[str] = set()
-    for bucket in (
-        "files_needing_metadata",
-        "files_needing_ocr",
-        "files_with_partial_metadata",
-        "files_with_stale_metadata",
-    ):
-        for entry in getattr(wl, bucket):
-            rel = entry.get("relative_path")
-            if rel and rel not in seen:
-                seen.add(rel)
-                candidates.append(rel)
-
+    report = run_scan(force=force)
+    candidates = list(report.worklist.iter_digest_candidates())
     if not candidates:
         typer.echo("nothing to digest")
         return
 
-    skipped = 0
-    todo: list[str] = []
-    for rel in candidates:
-        full = settings.docs / rel
-        if not force and _is_digested_fresh(rel, full):
-            skipped += 1
-            continue
-        todo.append(rel)
+    typer.echo(f"digesting {len(candidates)} file(s)")
 
-    if not todo:
-        msg = "nothing to digest"
-        if skipped:
-            msg += f" ({skipped} already-digested skipped; use --force to redo)"
-        typer.echo(msg)
-        return
-
-    msg = f"digesting {len(todo)} file(s)"
-    if skipped:
-        msg += f" ({skipped} already-digested skipped; use --force to redo)"
-    typer.echo(msg)
-
-    append_event(DIGEST_STARTED, scope="tree", count=len(todo))
+    append_event(DIGEST_STARTED, scope="tree", count=len(candidates))
 
     failures = 0
     try:
-        for rel in todo:
-            full = settings.docs / rel
+        for candidate in candidates:
+            full = settings.docs / candidate.rel
             if not full.exists():
-                typer.echo(f"{rel} | MISSING under {settings.docs}")
+                msg = f"{candidate.rel} | MISSING under {settings.docs}"
+                typer.echo(msg)
+                log.error("%s", msg)
                 failures += 1
                 if stop_on_error:
                     raise typer.Exit(1)
                 continue
-            result = digest_file(full, dry_run=dry_run, force_ocr=force_ocr)
-            typer.echo(format_result_line(result))
+            result = digest_file(
+                full,
+                dry_run=dry_run,
+                force_ocr=force_ocr,
+                file_hash=candidate.file_hash,
+                expected_size=candidate.size,
+                expected_mtime=candidate.mtime,
+            )
+            line = format_result_line(result)
+            typer.echo(line)
             if result.error:
+                log.error("%s", line)
                 failures += 1
                 if stop_on_error:
                     raise typer.Exit(1)
+        if not dry_run:
+            recompute_dups()
     finally:
         append_event(
             DIGEST_FINISHED,
             scope="tree",
-            succeeded=len(todo) - failures,
+            succeeded=len(candidates) - failures,
             failed=failures,
             ready_count=triage_count(),
         )
 
-    typer.echo(f"done: {len(todo) - failures}/{len(todo)} succeeded")
+    typer.echo(f"done: {len(candidates) - failures}/{len(candidates)} succeeded")
     if failures:
         raise typer.Exit(1)
 
@@ -161,7 +130,7 @@ def scan(
     path: Annotated[Optional[Path], typer.Option("--path", help="Limit the scan to a relative subpath under DOCS (e.g. 'Inbox').")] = None,
     print_json: Annotated[bool, typer.Option("--json", help="Print the worklist as JSON.")] = False,
 ) -> None:
-    """Run the scanner; report what `digest` would do. No files are written."""
+    """Run the scanner; reconcile rows with the filesystem and report digest work."""
     if docs is not None:
         os.environ["DOCS"] = str(docs.resolve())
         from dragndoc.config import reset_settings
@@ -169,7 +138,7 @@ def scan(
     log.info("CLI: scan (path=%s, json=%s)", path, print_json)
     from dragndoc.events import SCAN_FINISHED, SCAN_STARTED, append as append_event
     from dragndoc.scanner import run_scan
-    from dragndoc.triage_queue import count as triage_count
+    from dragndoc.triage import count as triage_count
 
     append_event(SCAN_STARTED, scope="subpath" if path else "tree", path=str(path) if path else None)
     wl = None

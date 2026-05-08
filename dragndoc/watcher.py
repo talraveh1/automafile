@@ -19,8 +19,10 @@ from dragndoc.events import (
 )
 from dragndoc.log import get_logger
 from dragndoc.pipeline import digest_file, format_result_line
+from dragndoc.scanner import ContentChanged, NewFile, NoChange, Renamed, reconcile_single
+from dragndoc.meta_store import recompute_dups_for_hashes
 from dragndoc.treewalk import BLOCK_MARKER_FILENAME, is_in_blocked_subtree
-from dragndoc.triage_queue import count as triage_count
+from dragndoc.triage import count as triage_count
 
 
 log = get_logger(__name__)
@@ -47,7 +49,7 @@ class _InboxHandler(FileSystemEventHandler):
     def on_modified(self, event):
         if event.is_directory:
             return
-        # ignore modifications: we only care about new arrivals to keep things idempotent
+        self._maybe_process(Path(os.fsdecode(event.src_path)))
 
     def _maybe_process(self, path: Path) -> None:
         settings = get_settings()
@@ -66,34 +68,50 @@ class _InboxHandler(FileSystemEventHandler):
             self._wait_for_settle(path)
             if not path.exists():
                 return
-            log.info("Digesting new file: %s", path)
-            append_event(DIGEST_STARTED, scope="file", file=path.name)
-            try:
-                result = digest_file(path)
-            finally:
-                pass
-            log.info(format_result_line(result))
-            if result.error:
-                append_event(ERROR, file=path.name, error=result.error)
-            try:
-                ready = triage_count()
-            except Exception:  # noqa: BLE001
-                ready = 0
-            append_event(
-                DIGEST_FINISHED,
-                scope="file",
-                file=path.name,
-                succeeded=0 if result.error else 1,
-                failed=1 if result.error else 0,
-                category=result.category,
-                ready_count=ready,
-            )
+            outcome = reconcile_single(path)
+            match outcome:
+                case Renamed(row=row, file_hash=_file_hash):
+                    log.info("Rename detected for %s -> row id=%s", path, row.id)
+                    return
+                case NoChange():
+                    return
+                case ContentChanged(row=row, file_hash=file_hash):
+                    self._digest_and_emit(path, file_hash=file_hash)
+                    recompute_dups_for_hashes({row.hash, file_hash})
+                case NewFile(file_hash=file_hash):
+                    self._digest_and_emit(path, file_hash=file_hash)
+                    recompute_dups_for_hashes({file_hash})
         except Exception as exc:  # noqa: BLE001
             log.exception("Unhandled error while processing %s: %s", path, exc)
             append_event(ERROR, file=path.name, error=str(exc))
         finally:
             with self._lock:
                 self._inflight.discard(path)
+
+    @staticmethod
+    def _digest_and_emit(path: Path, *, file_hash: str) -> None:
+        log.info("Digesting file: %s", path)
+        append_event(DIGEST_STARTED, scope="file", file=path.name)
+        result = digest_file(path, file_hash=file_hash)
+        line = format_result_line(result)
+        if result.error:
+            log.error("%s", line)
+            append_event(ERROR, file=path.name, error=result.error)
+        else:
+            log.info("%s", line)
+        try:
+            ready = triage_count()
+        except Exception:  # noqa: BLE001
+            ready = 0
+        append_event(
+            DIGEST_FINISHED,
+            scope="file",
+            file=path.name,
+            succeeded=0 if result.error else 1,
+            failed=1 if result.error else 0,
+            category=result.category,
+            ready_count=ready,
+        )
 
     @staticmethod
     def _wait_for_settle(path: Path) -> None:

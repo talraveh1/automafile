@@ -7,7 +7,6 @@ import os
 import subprocess
 import sys
 import tempfile
-from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
 
@@ -17,7 +16,7 @@ from dragndoc.cli import meta_app
 
 
 _META_FRONTMATTER_FIELDS = {
-    "category", "parties", "langs", "tags", "date", "title", "confidence", "summary", "notes",
+    "category", "parties", "langs", "tags", "date", "title", "confidence", "summary", "notes", "dup",
 }
 
 
@@ -37,9 +36,10 @@ def _freeze_identity(new_doc, base) -> None:
     new_doc.path = base.path
     new_doc.hash = base.hash
     new_doc.size = base.size
-    new_doc.original = base.original = {
-    "category", "parties", "langs", "tags", "date", "title", "confidence", "summary", "notes",
-}
+    new_doc.modified = base.modified
+    new_doc.digested = base.digested
+    new_doc.original = base.original
+    new_doc.dup = base.dup
 
 
 @meta_app.command("get")
@@ -48,7 +48,7 @@ def meta_get(
 ) -> None:
     """JSON dump of one row (was `inspect`)."""
     doc = _require_doc(path)
-    payload = asdict(doc)  # pyright: ignore[reportArgumentType]
+    payload = doc.to_dict()
     typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
 
 
@@ -69,9 +69,10 @@ def meta_set(
     assignments: Annotated[list[str], typer.Argument(help="One or more `field=value` pairs.")],
 ) -> None:
     """Set one or more fields on a row. `field=value`; lists comma-separated (e.g. `tags=tax,2025`)."""
-    from dragndoc.meta_store import upsert
+    from dragndoc.meta_store import set_dup, upsert
 
     doc = _require_doc(path)
+    dup_value: str | None = None
 
     for assignment in assignments:
         if "=" not in assignment:
@@ -83,7 +84,9 @@ def meta_set(
         if key not in _META_FRONTMATTER_FIELDS:
             typer.echo(f"unknown or read-only field: {key}", err=True)
             raise typer.Exit(2)
-        if key in {"parties", "langs", "tags"}:
+        if key == "dup":
+            dup_value = value
+        elif key in {"parties", "langs", "tags"}:
             setattr(doc, key, [v.strip() for v in value.split(",") if v.strip()])
         elif key == "summary":
             doc.summary = value
@@ -91,7 +94,14 @@ def meta_set(
             doc.notes = value
         else:
             setattr(doc, key, value or None)
-    upsert(doc)
+    if any(not assignment.partition("=")[0].strip() == "dup" for assignment in assignments):
+        upsert(doc)
+    if dup_value is not None:
+        try:
+            set_dup(path, dup_value)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(2) from None
     typer.echo(f"updated: {doc.path}")
 
 

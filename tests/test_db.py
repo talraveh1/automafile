@@ -18,7 +18,7 @@ from dragndoc.meta_store import (
     delete_by_path,
     doc_from_markdown,
     get_by_file,
-    get_by_hash,
+    get_hash,
     get_by_path,
     relative_to_root,
     to_markdown,
@@ -80,16 +80,17 @@ def test_upsert_and_get_by_path(docs_root):
     assert fetched.title == "t"
     assert fetched.tags == ["a", "b"]
     assert fetched.category == "Personal"
+    assert fetched.dup == "unique"
 
 
-def test_get_by_hash_returns_all_matches(docs_root):
+def test_get_hash_returns_all_matches(docs_root):
     p1 = docs_root / "Inbox" / "a.txt"
     p2 = docs_root / "Inbox" / "b.txt"
     p1.write_text("x", encoding="utf-8")
     p2.write_text("x", encoding="utf-8")
     upsert(Doc(path=relative_to_root(p1), hash="sha256:dup", size=1, original=p1.name))
     upsert(Doc(path=relative_to_root(p2), hash="sha256:dup", size=1, original=p2.name))
-    docs = get_by_hash("sha256:dup")
+    docs = get_hash("sha256:dup")
     paths = sorted(d.path for d in docs)
     assert paths == ["Inbox/a.txt", "Inbox/b.txt"]
 
@@ -206,3 +207,4 @@ def test_markdown_round_trip(docs_root):
     assert parsed.summary == "The summary"
     assert parsed.notes == "Some notes"
     assert parsed.confidence == "high"
+    assert parsed.dup == "unique"

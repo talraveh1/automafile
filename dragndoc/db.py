@@ -21,7 +21,29 @@ from dragndoc.log import get_logger
 log = get_logger(__name__)
 
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
+
+
+_DOCS_FULL_SQL = """
+CREATE VIEW IF NOT EXISTS docs_full AS
+SELECT d.*,
+       o.decision   AS ocr_decision,
+       o.done       AS ocr_done,
+       o.engine     AS ocr_engine,
+       o.engine_ver AS ocr_engine_ver,
+       o.langs      AS ocr_langs
+FROM docs d
+LEFT JOIN ocr o ON o.doc_id = d.id
+"""
+
+
+_TRIAGE_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS triage (
+    doc_id      INTEGER PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
+    enqueued_at TEXT NOT NULL,
+    reason      TEXT NOT NULL DEFAULT 'digested'
+)
+"""
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -40,6 +62,8 @@ CREATE TABLE IF NOT EXISTS docs (
     title       TEXT,
     confidence  TEXT NOT NULL DEFAULT 'low'
                 CHECK (confidence IN ('low', 'medium', 'high', 'confirmed')),
+    dup         TEXT NOT NULL DEFAULT 'unique'
+                CHECK (dup IN ('unique', 'dup', 'keep')),
     summary     TEXT NOT NULL DEFAULT '',
     notes       TEXT NOT NULL DEFAULT '',
     extra       TEXT NOT NULL DEFAULT '{}'
@@ -48,6 +72,7 @@ CREATE TABLE IF NOT EXISTS docs (
 CREATE INDEX IF NOT EXISTS ix_docs_hash       ON docs(hash);
 CREATE INDEX IF NOT EXISTS ix_docs_category   ON docs(category);
 CREATE INDEX IF NOT EXISTS ix_docs_digested   ON docs(digested);
+CREATE INDEX IF NOT EXISTS ix_docs_dup        ON docs(dup);
 
 CREATE TABLE IF NOT EXISTS ocr (
     doc_id      INTEGER PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
@@ -58,15 +83,7 @@ CREATE TABLE IF NOT EXISTS ocr (
     langs       TEXT NOT NULL DEFAULT ''
 );
 
-CREATE VIEW IF NOT EXISTS docs_full AS
-SELECT d.*,
-       o.decision   AS ocr_decision,
-       o.done       AS ocr_done,
-       o.engine     AS ocr_engine,
-       o.engine_ver AS ocr_engine_ver,
-       o.langs      AS ocr_langs
-FROM docs d
-LEFT JOIN ocr o ON o.doc_id = d.id;
+""" + _DOCS_FULL_SQL + """;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
     title, summary, notes, tags, parties,
@@ -100,12 +117,8 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS ix_events_id ON events(id);
 
-CREATE TABLE IF NOT EXISTS triage_queue (
-    doc_id      INTEGER PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
-    enqueued_at TEXT NOT NULL,
-    reason      TEXT NOT NULL DEFAULT 'digested'
-);
-CREATE INDEX IF NOT EXISTS ix_triage_enqueued ON triage_queue(enqueued_at);
+""" + _TRIAGE_TABLE_SQL + """;
+CREATE INDEX IF NOT EXISTS ix_triage_enqueued ON triage(enqueued_at);
 
 CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
@@ -116,6 +129,51 @@ CREATE TABLE IF NOT EXISTS schema_meta (
 
 _bootstrap_lock = threading.Lock()
 _bootstrapped: set[Path] = set()
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+        (name,),
+    ).fetchone()
+    return row is not None
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row[1] == column for row in rows)
+
+
+def _read_ver(conn: sqlite3.Connection) -> str | None:
+    try:
+        row = conn.execute("SELECT value FROM schema_meta WHERE key = 'ver'").fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table" in str(exc).lower():
+            return None
+        raise
+    return str(row[0]) if row and row[0] else None
+
+
+def _migrate_1_to_3(conn: sqlite3.Connection) -> None:
+    if not _column_exists(conn, "docs", "dup"):
+        conn.execute(
+            "ALTER TABLE docs ADD COLUMN dup TEXT NOT NULL DEFAULT 'unique' "
+            "CHECK (dup IN ('unique', 'dup', 'keep'))"
+        )
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_docs_dup ON docs(dup)")
+    if _table_exists(conn, "triage_queue") and not _table_exists(conn, "triage"):
+        conn.execute("ALTER TABLE triage_queue RENAME TO triage")
+    if not _table_exists(conn, "triage"):
+        conn.execute(_TRIAGE_TABLE_SQL)
+    conn.execute("DROP INDEX IF EXISTS ix_triage_enqueued")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_triage_enqueued ON triage(enqueued_at)")
+    conn.execute("DROP VIEW IF EXISTS docs_full")
+    conn.execute(_DOCS_FULL_SQL)
+
+
+_MIGRATIONS = [
+    ("1", "3", _migrate_1_to_3),
+]
 
 
 def db_path() -> Path:
@@ -137,12 +195,40 @@ def bootstrap_schema(path: Path | None = None) -> None:
         if target in _bootstrapped and target.exists():
             return
         target.parent.mkdir(parents=True, exist_ok=True)
+        existed_before_open = target.exists()
         conn = sqlite3.connect(str(target))
         try:
             _apply_pragmas(conn)
+            had_docs_before_bootstrap = _table_exists(conn, "docs") if existed_before_open else False
+            current = _read_ver(conn)
+            if current is None:
+                if not had_docs_before_bootstrap:
+                    conn.executescript(_SCHEMA_SQL)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('ver', ?)",
+                        (SCHEMA_VERSION,),
+                    )
+                    conn.commit()
+                    _bootstrapped.add(target)
+                    log.debug("schema bootstrapped at %s", target)
+                    return
+                raise RuntimeError("Existing database is missing schema_meta.ver; migrate it explicitly")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            for from_ver, to_ver, fn in _MIGRATIONS:
+                if current == from_ver:
+                    fn(conn)
+                    conn.execute(
+                        "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('ver', ?)",
+                        (to_ver,),
+                    )
+                    current = to_ver
+            if current != SCHEMA_VERSION:
+                raise RuntimeError(f"Unsupported schema version: {current}")
             conn.executescript(_SCHEMA_SQL)
             conn.execute(
-                "INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('ver', ?)",
+                "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('ver', ?)",
                 (SCHEMA_VERSION,),
             )
             conn.commit()

@@ -328,11 +328,11 @@ def _launch_triage() -> None:
 def _count_ready_for_triage() -> int:
     """Number of inbox files queued for triage (filled by digest, drained by /triage)."""
     try:
-        from dragndoc.triage_queue import count as q_count
+        from dragndoc.triage import count as q_count
 
         return q_count(inbox_only=True)
     except Exception as exc:  # noqa: BLE001
-        log.debug("triage_queue count failed: %s", exc)
+        log.debug("triage count failed: %s", exc)
         return 0
 
 

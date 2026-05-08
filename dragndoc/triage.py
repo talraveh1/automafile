@@ -36,7 +36,7 @@ def enqueue(doc_id: int, reason: str = "digested") -> None:
     """Add (or refresh) a row's place in the queue."""
     with transaction() as conn:
         conn.execute(
-            "INSERT INTO triage_queue (doc_id, enqueued_at, reason) VALUES (?, ?, ?) "
+            "INSERT INTO triage (doc_id, enqueued_at, reason) VALUES (?, ?, ?) "
             "ON CONFLICT(doc_id) DO UPDATE SET enqueued_at = excluded.enqueued_at, "
             "reason = excluded.reason",
             (doc_id, utc_now_iso(), reason),
@@ -45,38 +45,57 @@ def enqueue(doc_id: int, reason: str = "digested") -> None:
 
 def dequeue_by_doc_id(doc_id: int) -> bool:
     with transaction() as conn:
-        cur = conn.execute("DELETE FROM triage_queue WHERE doc_id = ?", (doc_id,))
+        cur = conn.execute("DELETE FROM triage WHERE doc_id = ?", (doc_id,))
     return cur.rowcount > 0
 
 
 def dequeue_by_path(rel_path: str) -> bool:
     with transaction() as conn:
         cur = conn.execute(
-            "DELETE FROM triage_queue WHERE doc_id = (SELECT id FROM docs WHERE path = ?)",
+            "DELETE FROM triage WHERE doc_id = (SELECT id FROM docs WHERE path = ?)",
             (rel_path,),
         )
     return cur.rowcount > 0
 
 
-def _select(*, inbox_only: bool, limit: int | None) -> list[QueueEntry]:
+def _select_real(*, inbox_only: bool) -> list[QueueEntry]:
     sql = (
         "SELECT q.enqueued_at AS q_enqueued_at, q.reason AS q_reason, d.* "
-        "FROM triage_queue q JOIN docs_full d ON d.id = q.doc_id"
+        "FROM triage q JOIN docs_full d ON d.id = q.doc_id"
     )
     params: list[Any] = []
     if inbox_only:
         sql += " WHERE d.path LIKE ?"
         params.append(f"{_inbox_prefix()}%")
     sql += " ORDER BY q.enqueued_at ASC, q.doc_id ASC"
-    if limit is not None:
-        sql += " LIMIT ?"
-        params.append(int(limit))
     with connect(readonly=True) as conn:
         rows = conn.execute(sql, params).fetchall()
-    out: list[QueueEntry] = []
-    for r in rows:
-        out.append(QueueEntry(doc=_row_to_doc(r), enqueued_at=r["q_enqueued_at"], reason=r["q_reason"]))
-    return out
+    return [QueueEntry(doc=_row_to_doc(r), enqueued_at=r["q_enqueued_at"], reason=r["q_reason"]) for r in rows]
+
+
+def _select_synthetic_dups(*, inbox_only: bool) -> list[QueueEntry]:
+    sql = (
+        "SELECT d.* FROM docs_full d "
+        "WHERE d.dup = 'dup' "
+        "AND NOT EXISTS (SELECT 1 FROM triage q WHERE q.doc_id = d.id)"
+    )
+    params: list[Any] = []
+    if inbox_only:
+        sql += " AND d.path LIKE ?"
+        params.append(f"{_inbox_prefix()}%")
+    sql += " ORDER BY COALESCE(d.digested, d.path) ASC, d.id ASC"
+    with connect(readonly=True) as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [
+        QueueEntry(doc=_row_to_doc(r), enqueued_at=r["digested"] or "", reason="duplicate")
+        for r in rows
+    ]
+
+
+def _select(*, inbox_only: bool, limit: int | None) -> list[QueueEntry]:
+    out = _select_real(inbox_only=inbox_only) + _select_synthetic_dups(inbox_only=inbox_only)
+    out.sort(key=lambda entry: (entry.enqueued_at or "", entry.doc.id or 0))
+    return out[:limit] if limit is not None else out
 
 
 def list_queue(*, inbox_only: bool = True) -> list[QueueEntry]:
@@ -89,26 +108,19 @@ def next_entry(*, inbox_only: bool = True) -> QueueEntry | None:
 
 
 def count(*, inbox_only: bool = True) -> int:
-    sql = "SELECT COUNT(*) AS n FROM triage_queue q JOIN docs d ON d.id = q.doc_id"
-    params: list[Any] = []
-    if inbox_only:
-        sql += " WHERE d.path LIKE ?"
-        params.append(f"{_inbox_prefix()}%")
-    with connect(readonly=True) as conn:
-        row = conn.execute(sql, params).fetchone()
-    return int(row["n"] if row else 0)
+    return len(_select(inbox_only=inbox_only, limit=None))
 
 
 def clear(*, inbox_only: bool = True) -> int:
     """Drop entries from the queue. Returns the number removed."""
     if inbox_only:
         sql = (
-            "DELETE FROM triage_queue WHERE doc_id IN ("
+            "DELETE FROM triage WHERE doc_id IN ("
             "SELECT id FROM docs WHERE path LIKE ?)"
         )
         params: list[Any] = [f"{_inbox_prefix()}%"]
     else:
-        sql = "DELETE FROM triage_queue"
+        sql = "DELETE FROM triage"
         params = []
     with transaction() as conn:
         cur = conn.execute(sql, params)
@@ -123,9 +135,9 @@ def rebuild_from_existing_docs(*, inbox_only: bool = True) -> int:
     Already-queued rows are left alone.
     """
     sql = (
-        "INSERT INTO triage_queue (doc_id, enqueued_at, reason) "
+        "INSERT INTO triage (doc_id, enqueued_at, reason) "
         "SELECT d.id, ?, 'rebuild' FROM docs d "
-        "WHERE NOT EXISTS (SELECT 1 FROM triage_queue q WHERE q.doc_id = d.id)"
+        "WHERE NOT EXISTS (SELECT 1 FROM triage q WHERE q.doc_id = d.id)"
     )
     params: list[Any] = [utc_now_iso()]
     if inbox_only:

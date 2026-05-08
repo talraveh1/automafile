@@ -94,7 +94,7 @@ def test_mute_skips_toast_but_advances_cursor(docs_root):
 def test_status_text_default_and_after_event(docs_root):
     from dragndoc.toaster import TrayState
     state = TrayState()
-    assert state.status_text() == "No notifications yet"
+    assert state.status_text() == "Idle"
 
     events.append("processed", file="report.pdf", category="Finance")
     _consume(Cursor(), MagicMock(), state)
@@ -104,17 +104,18 @@ def test_status_text_default_and_after_event(docs_root):
 
 
 def test_count_ready_for_triage(docs_root):
-    """Files in the inbox that have a row count; bare files don't."""
+    """Files in the inbox count when they have real or synthetic triage entries."""
     from dragndoc.meta_store import Doc, OcrInfo, relative_to_root, upsert
     from dragndoc.metadata.hashing import hash_file
     from dragndoc.toaster import _count_ready_for_triage
+    from dragndoc.triage import enqueue
 
     inbox = docs_root / "Inbox"
 
     # has a row → counts
     ready = inbox / "ready.pdf"
     ready.write_text("x", encoding="utf-8")
-    upsert(Doc(
+    ready_id = upsert(Doc(
         path=relative_to_root(ready),
         hash=hash_file(ready),
         size=ready.stat().st_size,
@@ -122,6 +123,7 @@ def test_count_ready_for_triage(docs_root):
         category="Personal",
         ocr=OcrInfo(decision="never"),
     ))
+    enqueue(ready_id)
 
     # no row → doesn't count
     pending = inbox / "pending.pdf"
@@ -132,7 +134,7 @@ def test_count_ready_for_triage(docs_root):
     nested.mkdir(parents=True)
     deep = nested / "deep.pdf"
     deep.write_text("x", encoding="utf-8")
-    upsert(Doc(
+    deep_id = upsert(Doc(
         path=relative_to_root(deep),
         hash=hash_file(deep),
         size=deep.stat().st_size,
@@ -140,6 +142,7 @@ def test_count_ready_for_triage(docs_root):
         category="Personal",
         ocr=OcrInfo(decision="never"),
     ))
+    enqueue(deep_id)
 
     assert _count_ready_for_triage() == 2
 

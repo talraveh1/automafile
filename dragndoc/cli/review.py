@@ -61,36 +61,21 @@ def review_ocr(
 
 @review_app.command("orphans")
 def review_orphans(
-    yes_all: Annotated[bool, typer.Option("--yes-all", help="Auto-accept hash-matched relinks when there is a single match.")] = False,
+    apply: Annotated[bool, typer.Option("--apply", help="Apply proposed relinks instead of previewing them.")] = False,
 ) -> None:
-    """Walk rows whose file is missing on disk; offer hash-matched relinks."""
-    from dragndoc.metadata.reconcile import find_orphans, relink
+    """Preview rows whose file is missing on disk and hash-matched relinks."""
+    from dragndoc.scanner import run_scan
 
-    log.info("CLI: review orphans (yes_all=%s)", yes_all)
-    orphans = find_orphans()
-    if not orphans:
+    log.info("CLI: review orphans (apply=%s)", apply)
+    report = run_scan(apply=apply)
+    recon = report.reconciliation
+    if not recon.renames and not recon.merges and not recon.unresolved_orphans:
         typer.echo("No orphan rows.")
         return
-
-    for orphan in orphans:
-        typer.echo(f"\nOrphan row id={orphan.doc_id}")
-        typer.echo(f"  recorded path: {orphan.recorded_path}")
-        if not orphan.matches_in_tree:
-            typer.echo("  no hash matches; leave for manual cleanup.")
-            continue
-        for i, p in enumerate(orphan.matches_in_tree):
-            typer.echo(f"  [{i}] {p}")
-        if yes_all and len(orphan.matches_in_tree) == 1:
-            choice = "0"
-        else:
-            choice = typer.prompt("Pick index to relink (or 'n' to skip)", default="n")
-        if choice.lower().startswith("n"):
-            continue
-        try:
-            idx = int(choice)
-            target = orphan.matches_in_tree[idx]
-        except (ValueError, IndexError):
-            typer.echo("  invalid choice; skipping.")
-            continue
-        relink(orphan.doc_id, target)
-        typer.echo(f"  relinked to {target}")
+    action = "applied" if apply else "proposed"
+    for old, new in recon.renames:
+        typer.echo(f"{action} rename: {old} -> {new}")
+    for merge in recon.merges:
+        typer.echo(f"{action} merge: {merge.old_path} -> {merge.new_path} winner={merge.winner_id} loser={merge.loser_id}")
+    for orphan in recon.unresolved_orphans:
+        typer.echo(f"unresolved: {orphan.recorded_path} id={orphan.doc_id} reason={orphan.reason}")

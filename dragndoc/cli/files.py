@@ -83,7 +83,7 @@ def rm(
     force: Annotated[bool, typer.Option("-f", "--force", help="Ignore missing file and exit successfully.")] = False,
 ) -> None:
     """Remove a file and its metadata row."""
-    from dragndoc.meta_store import delete_by_path, relative_to_root
+    from dragndoc.meta_store import delete_by_path, get_by_path, recompute_dups_for_hashes, relative_to_root
 
     if not path.exists():
         if force:
@@ -96,8 +96,11 @@ def rm(
 
     log.info("CLI: rm %s (force=%s)", path, force)
     rel = relative_to_root(path)
+    deleted = get_by_path(rel)
     path.unlink()
     delete_by_path(rel)
+    if deleted is not None:
+        recompute_dups_for_hashes({deleted.hash})
     typer.echo(f"removed: {path}")
 
 

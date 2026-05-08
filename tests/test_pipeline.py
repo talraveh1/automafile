@@ -48,6 +48,19 @@ def test_digest_dry_run_does_not_write(docs_root):
     assert get_by_file(p) is None
 
 
+def test_digest_file_with_hash_skips_internal_hash(docs_root):
+    p = docs_root / "Inbox" / "note.txt"
+    p.write_text("hi", encoding="utf-8")
+    with patch("dragndoc.pipeline.enrich", return_value=_FAKE), \
+         patch("dragndoc.pipeline.hash_file") as mocked_hash:
+        result = digest_file(p, file_hash="sha256:provided")
+    assert result.error is None
+    assert mocked_hash.call_count == 0
+    doc = get_by_file(p)
+    assert doc is not None
+    assert doc.hash == "sha256:provided"
+
+
 def test_digest_skips_blocked_meta_tree(docs_root):
     blocked_dir = docs_root / "Inbox" / "bundle"
     blocked_dir.mkdir(parents=True, exist_ok=True)
