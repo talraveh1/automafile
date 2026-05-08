@@ -81,6 +81,14 @@ class _InboxHandler(FileSystemEventHandler):
                 case NewFile(file_hash=file_hash):
                     self._digest_and_emit(path, file_hash=file_hash)
                     recompute_dups_for_hashes({file_hash})
+        except FileNotFoundError:
+            log.info("File vanished before processing: %s", path)
+        except PermissionError as exc:
+            log.warning("Permission denied while processing %s: %s", path, exc)
+            append_event(ERROR, file=path.name, error=str(exc))
+        except OSError as exc:
+            log.warning("OS error while processing %s: %s", path, exc)
+            append_event(ERROR, file=path.name, error=str(exc))
         except Exception as exc:  # noqa: BLE001
             log.exception("Unhandled error while processing %s: %s", path, exc)
             append_event(ERROR, file=path.name, error=str(exc))
