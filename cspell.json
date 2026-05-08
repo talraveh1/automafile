@@ -139,7 +139,12 @@
     "olefile",
     "pystray",
     "distutils",
-    "Sandboxed"
+    "Sandboxed",
+    "PROCESSENTRY",
+    "Toolhelp",
+    "SNAPPROCESS",
+    "WINFUNCTYPE",
+    "windowsterminal"
   ],
   "languageSettings": [
     {
