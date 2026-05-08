@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
+
+
+# Route test-file .pyc caches to build/pycache so __pycache__ folders don't
+# scatter through the source tree. Runs before any test module is imported.
+sys.pycache_prefix = str(Path(__file__).resolve().parent.parent / "build" / "pycache")
 
 
 @pytest.fixture(autouse=True)
