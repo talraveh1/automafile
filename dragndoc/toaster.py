@@ -11,6 +11,7 @@ events).
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import subprocess
@@ -106,7 +107,7 @@ class TrayState:
                 return f"{self.action_items} {noun} ready for triage"
             if self.last_notification is not None:
                 return _truncate(self.last_notification, 80)
-            return "Idle"
+            return "No notifications yet"
 
 
 def _truncate(s: str, n: int) -> str:
@@ -130,14 +131,14 @@ def _format_toast(event: dict[str, Any]) -> Optional[tuple[str, str]]:
             return "Drag'n'Doc", f"{ready} {noun} ready for triage"
         if failed > 0:
             f = payload.get("file") or "?"
-            return "Drag'n'Doc error", f"failed to digest {f}"
+            return "Error", f"failed to digest {f}"
         return None
     if kind == "scan_finished":
         return None  # silent
     if kind in {"digest_started", "scan_started"}:
         return None  # silent — these only adjust the tray status line
     if kind == "error":
-        return "Drag'n'Doc error", f"{payload.get('file', '?')}: {payload.get('error', '?')}"
+        return "Error", f"{payload.get('file', '?')}: {payload.get('error', '?')}"
     if kind == "processed":  # legacy event from older pipelines
         body = f"{payload.get('file', '?')} → {payload.get('category', '?')}"
         target = payload.get("target")
@@ -145,6 +146,20 @@ def _format_toast(event: dict[str, Any]) -> Optional[tuple[str, str]]:
             body += f" ({target})"
         return "Drag'n'Doc", body
     return "Drag'n'Doc", f"{kind}: {payload}"
+
+
+# Title prefixes the toaster uses to flag severity. The Windows toast surface
+# already labels the app, so we don't repeat "Drag'n'Doc" here.
+_ERROR_TITLES = {"Error"}
+_WARNING_TITLES = {"Warning"}
+
+
+def _level_for_title(title: str) -> int:
+    if title in _ERROR_TITLES:
+        return logging.ERROR
+    if title in _WARNING_TITLES:
+        return logging.WARNING
+    return logging.INFO
 
 
 def _apply_run_state(event: dict[str, Any], state: Optional[TrayState]) -> None:
@@ -188,6 +203,10 @@ def _consume(cursor: Cursor, notifier: Notifier, state: Optional[TrayState] = No
         toast = _format_toast(event)
         if toast is not None:
             title, body = toast
+            # Mirror every user-facing notification into the log file so the
+            # log is a complete record of what was surfaced — independent of
+            # mute state and of whatever process emitted the source event.
+            log.log(_level_for_title(title), "%s", body)
             if enabled:
                 try:
                     notifier.notify(title, body)

@@ -49,6 +49,72 @@ def test_format_toast_unknown_kind_falls_through():
     assert "weird" in body
 
 
+def test_format_toast_error_uses_short_title():
+    result = _format_toast({
+        "kind": "error",
+        "payload": {"file": "missing.pdf", "error": "FileNotFoundError"},
+    })
+    assert result is not None
+    title, body = result
+    assert title == "Error"
+    assert "missing.pdf" in body
+    assert "FileNotFoundError" in body
+
+
+def test_format_toast_digest_finished_failure_uses_short_title():
+    result = _format_toast({
+        "kind": "digest_finished",
+        "payload": {"failed": 1, "ready_count": 0, "file": "broken.pdf"},
+    })
+    assert result is not None
+    title, body = result
+    assert title == "Error"
+    assert "broken.pdf" in body
+
+
+def test_consume_mirrors_error_toast_to_log(docs_root, caplog):
+    """Every user-facing toast must also land in the log file."""
+    import logging
+
+    events.append("error", file="missing.pdf", error="FileNotFoundError")
+    notifier = MagicMock()
+    with caplog.at_level(logging.ERROR, logger="dragndoc.toaster"):
+        _consume(Cursor(), notifier)
+
+    error_records = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert any("missing.pdf" in r.getMessage() for r in error_records)
+
+
+def test_consume_mirrors_info_toast_to_log(docs_root, caplog):
+    import logging
+
+    events.append("processed", file="a.pdf", category="Receipts")
+    notifier = MagicMock()
+    with caplog.at_level(logging.INFO, logger="dragndoc.toaster"):
+        _consume(Cursor(), notifier)
+
+    info_records = [r for r in caplog.records if r.levelno == logging.INFO]
+    assert any("a.pdf" in r.getMessage() for r in info_records)
+
+
+def test_consume_logs_even_when_muted(docs_root, caplog):
+    """Muting the toast should not mute the log entry."""
+    import logging
+    from dragndoc.toaster import TrayState
+
+    state = TrayState()
+    state.toggle_notifications()  # → disabled
+    assert not state.is_enabled()
+
+    events.append("error", file="x.pdf", error="boom")
+    notifier = MagicMock()
+    with caplog.at_level(logging.ERROR, logger="dragndoc.toaster"):
+        _consume(Cursor(), notifier, state)
+
+    notifier.notify.assert_not_called()
+    assert any("x.pdf" in r.getMessage() and r.levelno == logging.ERROR for r in caplog.records)
+
+
 def test_consume_advances_cursor_and_fires_toast(docs_root):
     events.append("processed", file="a.pdf", category="X")
     events.append("processed", file="b.pdf", category="Y")
@@ -94,7 +160,7 @@ def test_mute_skips_toast_but_advances_cursor(docs_root):
 def test_status_text_default_and_after_event(docs_root):
     from dragndoc.toaster import TrayState
     state = TrayState()
-    assert state.status_text() == "Idle"
+    assert state.status_text() == "No notifications yet"
 
     events.append("processed", file="report.pdf", category="Finance")
     _consume(Cursor(), MagicMock(), state)
