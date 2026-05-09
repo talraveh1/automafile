@@ -12,6 +12,7 @@ def _maybe_override_docs(docs: Path | None) -> None:
     if docs is None:
         return
     os.environ["DOCS"] = str(docs.resolve())
+    # reset cached settings so later config reads see the docs override immediately
     from dragndoc.config import reset_settings
 
     reset_settings()

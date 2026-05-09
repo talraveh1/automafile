@@ -81,10 +81,12 @@ def _completed_ocr_info(decision_action: str) -> OcrInfo:
 def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedDoc, OcrInfo]:
     settings = get_settings()
     if decision.action in {"no_ocr", "skip_encrypted"}:
+        # keep the skip reason so downstream metadata reflects why OCR never ran
         return doc, OcrInfo(decision=decision.action)
     if not tesseract_available():
         log.warning("OCR requested for %s but Tesseract is unavailable; skipping.", doc.path)
         return doc, OcrInfo(decision="ocr_unavailable")
+    # page-scoped OCR keeps the expensive fallback targeted when only some pages need rescue
     pages = decision.pages if decision.action == "ocr_pages" else None
     try:
         text = run_ocr(doc.path, langs=settings.tesseract.langs, pages=pages)
@@ -93,6 +95,7 @@ def _maybe_run_ocr(doc: ExtractedDoc, decision: OcrDecision) -> tuple[ExtractedD
         return doc, OcrInfo(decision="ocr_failed")
     cfg = CapConfig.from_settings(settings)
     combined = (doc.text + "\n\n" + text).strip() if doc.text else text
+    # collapse extractor text and OCR text into one section so enrichment sees a single body
     doc.sections = [Section(label=None, text=trim_to_word_boundary(combined, cfg.target_chars), index=0)]
     doc.total_sections = None
     doc.refresh_text()
@@ -139,6 +142,7 @@ def digest_file(
         return result
 
     if is_in_blocked_subtree(path, stop_at=settings.docs):
+        # respect directory-level opt-outs before any extraction, OCR, or hashing work starts
         result.error = "blocked_by_meta_file"
         result.metadata_target = "skipped"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
@@ -162,6 +166,7 @@ def digest_file(
     ocr_info = _completed_ocr_info(doc.ocr_decision) if doc.ocr_used else OcrInfo(decision=doc.ocr_decision)
     result.ocr_decision = ocr_info.decision
     if force_ocr:
+        # manual force bypasses the normal OCR decision path for this single digest
         decision = OcrDecision(action="ocr_full", reason="forced")
         log.debug("ocr decision for %s: %s (%s)", path, decision.action, decision.reason or "-")
         doc, ocr_info = _maybe_run_ocr(doc, decision)
@@ -178,6 +183,7 @@ def digest_file(
     _assert_expected_file_facts(path, expected_size=expected_size, expected_mtime=expected_mtime)
 
     if dry_run:
+        # dry runs stop after enrichment so callers can inspect the result without mutating state
         result.metadata_target = "dry_run"
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         log.info(
@@ -202,6 +208,7 @@ def digest_file(
     from dragndoc.triage import enqueue as triage_enqueue
 
     try:
+        # enqueue only after the row exists so triage can always resolve the doc id
         triage_enqueue(result.doc_id, reason="digested")
     except Exception as exc:  # noqa: BLE001
         log.warning("triage enqueue failed for %s: %s", path, exc)

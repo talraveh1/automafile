@@ -71,6 +71,7 @@ class _InboxHandler(FileSystemEventHandler):
             outcome = reconcile_single(path)
             match outcome:
                 case Renamed(row=row, file_hash=_file_hash):
+                    # a pure rename keeps the existing metadata row, so there is nothing to redigest
                     log.info("Rename detected for %s -> row id=%s", path, row.id)
                     return
                 case NoChange():
@@ -132,6 +133,7 @@ class _InboxHandler(FileSystemEventHandler):
             except FileNotFoundError:
                 return
             if size == last_size and size > 0:
+                # require two matching non-zero sizes so we do not digest a file mid-copy
                 return
             last_size = size
             time.sleep(0.5)

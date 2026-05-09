@@ -134,12 +134,14 @@ def extract(path: Path) -> ExtractedDoc:
     mime = _mime_from_extension(path)
     if mime != UNKNOWN_MIME:
         try:
+            # known extensions get a strict first pass so mislabeled files fail fast
             doc = _extract_with_mime(path, mime, strict=True)
             log.debug("extracted %s by extension MIME %s", path.name, mime)
             return doc
         except ExtractorError as exc:
             log.debug("extension MIME extraction failed for %s as %s: %s", path.name, mime, exc)
 
+    # fall back to sniffing only after the extension-based path declines the file
     sniffed_mime = _sniff_mime(path)
     if sniffed_mime:
         mime = sniffed_mime
@@ -153,5 +155,6 @@ def extract(path: Path) -> ExtractedDoc:
         except ExtractorError as exc:
             log.debug("fallback MIME extraction failed for %s as %s: %s", path.name, mime, exc)
 
+    # the unknown extractor is the final safety net for unsupported or ambiguous files
     log.debug("extracting %s as unknown", path.name)
     return _extract_with_mime(path, UNKNOWN_MIME, strict=False)

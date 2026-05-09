@@ -59,6 +59,7 @@ def _richness_score(row: sqlite3.Row) -> tuple[int, int, int, str]:
             filled += 1
     if row["tags"]:
         filled += len([chunk for chunk in str(row["tags"]).strip(";").split(";") if chunk])
+    # prefer rows that already carry stronger duplicate decisions and richer metadata
     return (
         DUP_RANK.get(str(row["dup"]), 0),
         CONFIDENCE_RANK.get(str(row["confidence"]), 0),
@@ -72,6 +73,7 @@ def _pick_winner(a: sqlite3.Row, b: sqlite3.Row) -> tuple[sqlite3.Row, sqlite3.R
     b_score = _richness_score(b)
     if a_score != b_score:
         return (a, b) if a_score > b_score else (b, a)
+    # break ties deterministically so repeated scans converge on the same surviving row
     return (a, b) if str(a["path"]) <= str(b["path"]) else (b, a)
 
 
@@ -109,6 +111,7 @@ def resolve_path_conflict(
     loser_ocr = conn.execute("SELECT * FROM ocr WHERE doc_id = ?", (loser["id"],)).fetchone()
     winner_ocr = conn.execute("SELECT 1 FROM ocr WHERE doc_id = ?", (winner["id"],)).fetchone()
     if loser_ocr is not None and winner_ocr is None:
+        # preserve the only OCR payload by reattaching it to the surviving doc row
         conn.execute("UPDATE ocr SET doc_id = ? WHERE doc_id = ?", (winner["id"], loser["id"]))
 
     conn.execute("DELETE FROM docs WHERE id = ?", (loser["id"],))
@@ -147,6 +150,7 @@ def reconcile_single(path: Path) -> ReconcileOutcome:
         if row is not None:
             doc = _row_to_doc(row)
             if row["hash"] == file_hash:
+                # refresh filesystem facts in place when content is unchanged but timestamps drift
                 if row["size"] != st.st_size or row["modified"] != modified:
                     conn.execute(
                         "UPDATE docs SET size = ?, modified = ? WHERE id = ?",
@@ -158,6 +162,7 @@ def reconcile_single(path: Path) -> ReconcileOutcome:
         rows = conn.execute("SELECT * FROM docs_full WHERE hash = ? ORDER BY path", (file_hash,)).fetchall()
         for candidate in rows:
             if not _full_path(candidate["path"]).exists():
+                # reuse a stale row when the same file content has simply moved paths
                 conn.execute(
                     "UPDATE docs SET path = ?, size = ?, modified = ? WHERE id = ?",
                     (rel, st.st_size, modified, candidate["id"]),

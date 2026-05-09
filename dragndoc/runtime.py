@@ -76,6 +76,7 @@ def _read_pid(paths: RuntimePaths) -> int | None:
     if not raw:
         return None
     try:
+        # ignore stale or partially written pid files instead of crashing status checks
         return int(raw)
     except ValueError:
         return None
@@ -149,6 +150,7 @@ def _run_supervisor_loop(
             return 0
 
         if should_exit is not None and should_exit():
+            # drain the child first so shutdown clears the pid file only after the watcher is gone
             if child is not None and child.poll() is None:
                 child.terminate()
                 try:
@@ -166,6 +168,7 @@ def _run_supervisor_loop(
             if exit_code is not None:
                 _clear_pid(paths)
                 child = None
+                # report crashes to the caller, but keep quiet for requested stops and disabled mode
                 if disabled or intentional_stop:
                     intentional_stop = False
                     log.info("Supervisor: watcher stopped intentionally")
@@ -178,6 +181,7 @@ def _run_supervisor_loop(
         if disabled:
             if child is not None:
                 intentional_stop = True
+                # keep honoring the stop marker until the child has actually exited
                 log.info("Supervisor: stopping watcher on request")
                 child.terminate()
                 try:
@@ -190,6 +194,7 @@ def _run_supervisor_loop(
             continue
 
         if child is None:
+            # only spawn when the stop marker is absent and no watcher is already running
             child = spawn_watcher()
             _write_pid(paths, child.pid)
             log.info("Supervisor: started watcher pid=%s", child.pid)
