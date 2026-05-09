@@ -8,6 +8,7 @@ from typing import Any
 from dragndoc.config import get_settings
 from dragndoc.extractors._caps import CapConfig, select_pages
 from dragndoc.extractors._meta import collect
+from dragndoc.extractors._ocr import OcrTracker
 from dragndoc.extractors.base import (
     CorruptDocumentError,
     EncryptedDocumentError,
@@ -98,12 +99,9 @@ def extract(path: Path) -> ExtractedDoc:
     settings = get_settings()
     cfg = CapConfig.from_settings(settings)
     text_layer_chars: list[int] = []
-    ocr_pages: list[int] = []
-    ocr_unavailable = False
-    ocr_failed = False
+    ocr = OcrTracker()
 
     def _iter_pages():
-        nonlocal ocr_failed, ocr_unavailable
         for page_index, page in enumerate(reader.pages):
             try:
                 page_text = page.extract_text() or ""
@@ -115,13 +113,13 @@ def extract(path: Path) -> ExtractedDoc:
             if should_ocr_page(page_text):
                 # rescue only sparse pages during extraction; full OCR is handled by pipeline decisions
                 if not tesseract_available():
-                    ocr_unavailable = True
+                    ocr.unavailable = True
                 else:
                     try:
                         section_text = run_ocr(path, langs=settings.tesseract.langs, pages=[page_index])
-                        ocr_pages.append(page_index)
+                        ocr.pages.append(page_index)
                     except Exception as exc:  # noqa: BLE001
-                        ocr_failed = True
+                        ocr.failed = True
                         log.warning("OCR failed for %s page %d: %s", path, page_index + 1, exc)
             yield section_text
 
@@ -132,22 +130,13 @@ def extract(path: Path) -> ExtractedDoc:
         for i, text in enumerate(kept)
     ]
 
-    if ocr_pages:
-        ocr_decision = "ocr_pages"
-    elif ocr_failed:
-        ocr_decision = "ocr_failed"
-    elif ocr_unavailable:
-        ocr_decision = "ocr_unavailable"
-    else:
-        ocr_decision = "no_ocr"
-
     return ExtractedDoc(
         path=path,
         sections=sections,
         total_sections=len(reader.pages),
-        ocr_used=bool(ocr_pages),
-        ocr_decision=ocr_decision,
-        ocr_pages=ocr_pages or None,
+        ocr_used=bool(ocr.pages),
+        ocr_decision=ocr.decision(),
+        ocr_pages=ocr.pages or None,
         format="pdf",
         per_page_chars=text_layer_chars,
         extracted_metadata=metadata,

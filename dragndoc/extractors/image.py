@@ -14,6 +14,7 @@ from typing import Any
 from dragndoc.config import get_settings
 from dragndoc.extractors._caps import CapConfig, select_pages
 from dragndoc.extractors._meta import collect
+from dragndoc.extractors._ocr import OcrTracker
 from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 from dragndoc.log import get_logger
 from dragndoc.ocr import ocr_image, tesseract_available
@@ -80,9 +81,7 @@ def extract(path: Path) -> ExtractedDoc:
     cfg = CapConfig.from_settings(settings)
     metadata: dict[str, Any] = {}
     n_frames = 1
-    ocr_pages: list[int] = []
-    ocr_unavailable = False
-    ocr_failed = False
+    ocr = OcrTracker()
     try:
         with Image.open(path) as im:
             n_frames = int(getattr(im, "n_frames", 1) or 1)
@@ -98,7 +97,6 @@ def extract(path: Path) -> ExtractedDoc:
             metadata.update(collect(_read_exif(im), prefix="exif_"))
 
             def _iter_frames():
-                nonlocal ocr_failed, ocr_unavailable
                 for frame_index in range(n_frames):
                     try:
                         im.seek(frame_index)
@@ -107,17 +105,17 @@ def extract(path: Path) -> ExtractedDoc:
                     frame_text = ""
                     # todo(vision): if OCR is sparse, optionally describe this frame with a vision model
                     if not tesseract_available():
-                        ocr_unavailable = True
+                        ocr.unavailable = True
                     else:
                         try:
                             frame_text = ocr_image(im.copy(), langs=settings.tesseract.langs)
-                            ocr_pages.append(frame_index)
+                            ocr.pages.append(frame_index)
                         except Exception as exc:  # noqa: BLE001
-                            ocr_failed = True
+                            ocr.failed = True
                             log.warning("OCR failed for %s frame %d: %s", path, frame_index + 1, exc)
                     yield frame_text
 
-                        # multi-frame images are treated like page sequences for capping and labels
+            # multi-frame images are treated like page sequences for capping and labels
             kept = select_pages(_iter_frames(), cfg)
     except Exception as exc:  # noqa: BLE001
         raise CorruptDocumentError(f"image failed for {path}: {exc}") from exc
@@ -132,22 +130,15 @@ def extract(path: Path) -> ExtractedDoc:
         ]
         total_sections = n_frames
 
-    if ocr_pages:
-        ocr_decision = "ocr_full" if n_frames == 1 else "ocr_pages"
-    elif ocr_failed:
-        ocr_decision = "ocr_failed"
-    elif ocr_unavailable:
-        ocr_decision = "ocr_unavailable"
-    else:
-        ocr_decision = "no_ocr"
+    success_decision = "ocr_full" if n_frames == 1 else "ocr_pages"
 
     return ExtractedDoc(
         path=path,
         sections=sections,
         total_sections=total_sections,
         format="image",
-        ocr_used=bool(ocr_pages),
-        ocr_decision=ocr_decision,
-        ocr_pages=ocr_pages or None,
+        ocr_used=bool(ocr.pages),
+        ocr_decision=ocr.decision(success=success_decision),
+        ocr_pages=ocr.pages or None,
         extracted_metadata=metadata,
     )

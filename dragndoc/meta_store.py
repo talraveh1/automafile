@@ -79,6 +79,29 @@ class OcrInfo:
             "langs": to_semilist(self.langs),
         }
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decision": self.decision,
+            "done": self.done,
+            "engine": self.engine,
+            "engine_ver": self.engine_ver,
+            "langs": list(self.langs),
+        }
+
+    @classmethod
+    def for_tesseract_run(cls, decision_action: str) -> "OcrInfo":
+        """Stamp a completed Tesseract pass with engine, version, and the configured langs."""
+        from dragndoc.ocr import tesseract_version
+
+        settings = get_settings()
+        return cls(
+            decision=decision_action,
+            done=utc_now_iso(),
+            engine="tesseract",
+            engine_ver=tesseract_version(),
+            langs=[s.strip() for s in settings.tesseract.langs.replace("+", ",").split(",") if s.strip()],
+        )
+
 
 @dataclass
 class Doc:
@@ -147,13 +170,7 @@ class Doc:
             "summary": self.summary,
             "notes": self.notes,
             "extra": dict(self.extra),
-            "ocr": {
-                "decision": self.ocr.decision,
-                "done": self.ocr.done,
-                "engine": self.ocr.engine,
-                "engine_ver": self.ocr.engine_ver,
-                "langs": list(self.ocr.langs),
-            },
+            "ocr": self.ocr.to_dict(),
         }
         if include_duplicates and self.hash:
             unapproved, approved = _duplicate_lists_for(self)
@@ -571,13 +588,7 @@ def to_markdown(doc: Doc) -> str:
         **duplicate_fields,
     }
     if not doc.ocr.is_unset():
-        front["ocr"] = {
-            "decision": doc.ocr.decision,
-            "done": doc.ocr.done,
-            "engine": doc.ocr.engine,
-            "engine_ver": doc.ocr.engine_ver,
-            "langs": list(doc.ocr.langs),
-        }
+        front["ocr"] = doc.ocr.to_dict()
     if doc.extra:
         front["extra"] = doc.extra
 

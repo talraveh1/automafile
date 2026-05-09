@@ -19,8 +19,8 @@ def review_ocr(
 ) -> None:
     """Walk OCR review candidates (engine/lang drift since extraction)."""
     from dragndoc.config import get_settings
-    from dragndoc.meta_store import OcrInfo, get_by_path, upsert, utc_now_iso
-    from dragndoc.ocr import run_ocr, tesseract_version
+    from dragndoc.meta_store import OcrInfo, get_by_path, upsert
+    from dragndoc.ocr import run_ocr
     from dragndoc.scanner import run_scan
 
     log.info("CLI: review ocr (yes_all=%s)", yes_all)
@@ -42,13 +42,7 @@ def review_ocr(
                 _ = run_ocr(full)
                 doc = get_by_path(rel)
                 if doc is not None:
-                    doc.ocr = OcrInfo(
-                        decision="ocr_full",
-                        done=utc_now_iso(),
-                        engine="tesseract",
-                        engine_ver=tesseract_version(),
-                        langs=[s.strip() for s in settings.tesseract.langs.replace("+", ",").split(",") if s.strip()],
-                    )
+                    doc.ocr = OcrInfo.for_tesseract_run("ocr_full")
                     upsert(doc)
                 typer.echo("  re-OCR'd.")
             except Exception as exc:  # noqa: BLE001
