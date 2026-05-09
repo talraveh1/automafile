@@ -11,7 +11,7 @@ from dragndoc.extractors._meta import collect
 from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
-# Full Dublin Core element set (the EPUB spec recommends these).
+# full Dublin Core element set recommended by the EPUB spec
 _DC_FIELDS = (
     "title", "creator", "subject", "description", "publisher",
     "contributor", "date", "type", "format", "identifier",

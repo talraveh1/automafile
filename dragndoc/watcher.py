@@ -63,6 +63,7 @@ class _InboxHandler(FileSystemEventHandler):
         with self._lock:
             if path in self._inflight:
                 return
+            # watchdog can emit create/modify/move bursts for the same file
             self._inflight.add(path)
         try:
             self._wait_for_settle(path)
@@ -100,6 +101,7 @@ class _InboxHandler(FileSystemEventHandler):
     @staticmethod
     def _digest_and_emit(path: Path, *, file_hash: str) -> None:
         log.info("Digesting file: %s", path)
+        # events keep the toaster and tray status decoupled from the watcher
         append_event(DIGEST_STARTED, scope="file", file=path.name)
         result = digest_file(path, file_hash=file_hash)
         line = format_result_line(result)

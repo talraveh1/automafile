@@ -106,6 +106,7 @@ def resolve_path_conflict(
     if old_row["hash"] != new_row["hash"]:
         return None
 
+    # same content at the target path can be merged into the richer surviving row
     winner, loser = _pick_winner(old_row, new_row)
     winner_values = _merged_doc_values(winner, loser)
     loser_ocr = conn.execute("SELECT * FROM ocr WHERE doc_id = ?", (loser["id"],)).fetchone()

@@ -11,7 +11,7 @@ from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, Section
 
 
 # openpyxl DocumentProperties attributes — the OOXML core properties
-# Windows 11 surfaces for spreadsheets.
+# windows 11 surfaces for spreadsheets
 _CORE_ATTRS = (
     "title", "subject", "creator", "keywords", "description", "lastModifiedBy",
     "category", "contentStatus", "identifier", "language", "version",
@@ -42,6 +42,7 @@ def extract(path: Path) -> ExtractedDoc:
                 chunks.append(line)
                 char_count += len(line) + 1
                 if char_count >= cfg.per_page_chars:
+                    # cap each sheet early so large workbooks do not dominate the prompt
                     break
             yield "\n".join(chunks)
 
@@ -64,6 +65,7 @@ def extract(path: Path) -> ExtractedDoc:
     try:
         custom = getattr(wb, "custom_doc_props", None)
         if custom is not None:
+            # custom OOXML properties often carry filing hints from business templates
             for prop in custom.props:
                 raw_custom[prop.name] = getattr(prop, "value", None)
     except Exception:

@@ -8,6 +8,8 @@ from typing import Any, Iterator
 
 @dataclass
 class DigestCandidate:
+    """One filesystem row that should be passed to ``digest_file``."""
+
     rel: str
     size: int
     mtime: str | None
@@ -32,6 +34,8 @@ class DigestCandidate:
 
 @dataclass
 class UnprocessableEntry:
+    """A file the scanner saw but cannot safely digest."""
+
     rel: str
     reason: str
 
@@ -41,6 +45,8 @@ class UnprocessableEntry:
 
 @dataclass
 class WorklistForDigest:
+    """Grouped digest candidates, preserving the reason each file was selected."""
+
     new_files: list[DigestCandidate] = field(default_factory=list)
     changed_files: list[DigestCandidate] = field(default_factory=list)
     partial_metadata: list[DigestCandidate] = field(default_factory=list)
@@ -50,6 +56,7 @@ class WorklistForDigest:
 
     def iter_digest_candidates(self) -> Iterator[DigestCandidate]:
         seen: set[str] = set()
+        # yield each path once even if it appears in multiple worklist buckets
         for bucket in (
             self.new_files,
             self.changed_files,
@@ -127,6 +134,8 @@ class ReconciliationReport:
 
 @dataclass
 class ScanReport:
+    """Public scan result shape used by CLI, tests, and JSON output."""
+
     ran_at: str
     docs_root: str
     files_seen: int

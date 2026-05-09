@@ -19,7 +19,7 @@ def test_clean_value_drops_empty_and_binary():
     assert clean_value("   ") is None
     assert clean_value(b"\x00\x01\x02") is None
     assert clean_value("has \x00 nul") is None
-    # XMP packet preamble — should be dropped wholesale, not clipped
+    # xmp packet preamble — should be dropped wholesale, not clipped
     assert clean_value("<?xpacket begin='?'><x:xmpmeta>...") is None
 
 
@@ -111,7 +111,7 @@ def test_pdf_extractor_surfaces_xmp(tmp_path):
     assert md["dc:title"] == "Lease Agreement"
     # multi-valued XMP fields come through as lists
     assert md["dc:creator"] == ["Acme Realty"]
-    # DocInfo derived by pikepdf from XMP
+    # docinfo derived by pikepdf from XMP
     assert md.get("info_Title") == "Lease Agreement"
 
 
@@ -188,7 +188,7 @@ def test_image_extractor_surfaces_exif_and_dimensions(tmp_path):
     p = tmp_path / "shot.jpg"
     im = Image.new("RGB", (320, 240), color=(128, 0, 128))
     exif = im.getexif()
-    # Standard EXIF tag IDs (we use the public PIL.ExifTags mapping).
+    # standard EXIF tag IDs from the public PIL.ExifTags mapping
     exif[0x010F] = "NIKON CORPORATION"      # Make
     exif[0x0110] = "NIKON D7000"            # Model
     exif[0x013B] = "Eve Photographer"       # Artist

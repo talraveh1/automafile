@@ -72,7 +72,7 @@ class LineRotatingFileSink:
         base = self.path
         backups_to_keep = max(self.max_files - 1, 0)
 
-        # Drop anything beyond what we want to keep.
+        # drop anything beyond what we want to keep
         for stale in base.parent.glob(base.name + ".*"):
             try:
                 idx = int(stale.name.rsplit(".", 1)[-1])
@@ -81,14 +81,14 @@ class LineRotatingFileSink:
             if idx > backups_to_keep:
                 stale.unlink(missing_ok=True)
 
-        # Shift remaining backups: .N-1 -> .N, ..., .1 -> .2.
+        # shift remaining backups: .N-1 -> .N, ..., .1 -> .2
         for i in range(backups_to_keep - 1, 0, -1):
             src = base.with_name(base.name + f".{i}")
             dst = base.with_name(base.name + f".{i + 1}")
             if src.exists():
                 src.replace(dst)
 
-        # Move the current file to .1, or just drop it if no backups are kept.
+        # move the current file to .1, or just drop it if no backups are kept
         if base.exists():
             if backups_to_keep >= 1:
                 base.replace(base.with_name(base.name + ".1"))

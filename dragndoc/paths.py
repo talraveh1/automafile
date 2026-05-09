@@ -26,6 +26,7 @@ def normalize(value: Pathish, *, root: Path | None = None) -> str:
 
     normalized = raw.strip().replace("\\", "/")
     if len(normalized) >= 2 and normalized[1] == ":":
+        # lower-case Windows drive letters so db keys are stable across callers
         normalized = normalized[0].lower() + normalized[1:]
     while len(normalized) > 1 and normalized.endswith("/"):
         normalized = normalized[:-1]
@@ -36,5 +37,6 @@ def normalize(value: Pathish, *, root: Path | None = None) -> str:
 
 def like_child_pattern(path: str) -> str:
     """Return a LIKE pattern matching immediate or deep children of ``path``."""
+    # escape LIKE wildcards; callers must use ESCAPE '\'
     escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"{escaped}/%"

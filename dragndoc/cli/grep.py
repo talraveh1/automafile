@@ -26,7 +26,7 @@ def grep(
         raise typer.Exit(2)
 
     if field:
-        # FTS5 column scoping: prefix each query term with `colname:` would be
+        # fts5 column scoping: prefix each query term with `colname:` would be
         # tedious for a free-form `pattern`; the `{col} : query` form scopes
         # the entire query to that column.
         match_query = f"{{{field}}} : {pattern}"

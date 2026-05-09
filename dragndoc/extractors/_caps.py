@@ -28,6 +28,7 @@ def trim_to_word_boundary(text: str, max_chars: int) -> str:
     cut = text[:max_chars]
     last_ws = max(cut.rfind(" "), cut.rfind("\n"), cut.rfind("\t"))
     if last_ws >= 0 and last_ws >= max_chars - 50:
+        # prefer a nearby word boundary so the LLM does not see chopped tokens
         return cut[:last_ws].rstrip()
     return cut.rstrip()
 
@@ -44,5 +45,6 @@ def select_pages(page_texts: Iterable[str], cfg: CapConfig) -> list[str]:
         trimmed = trim_to_word_boundary(raw, cfg.per_page_chars)
         kept.append(trimmed)
         if len(kept) >= cfg.min_pages and sum(len(page) for page in kept) >= cfg.target_chars:
+            # stop once both the minimum page count and target text budget are satisfied
             break
     return kept

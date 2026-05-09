@@ -31,7 +31,7 @@ def _resolve_tesseract_bin() -> str | None:
     settings = get_settings()
     # honor the configured path only if it actually exists; otherwise fall
     # through (this matters when running the host's config.jsonc inside a
-    # Linux container where the Windows-style path is invalid)
+    # linux container where the Windows-style path is invalid)
     if settings.tesseract.bin and Path(settings.tesseract.bin).exists():
         return settings.tesseract.bin
     found = shutil.which("tesseract")
@@ -57,6 +57,7 @@ def _configure_pytesseract() -> str | None:
             return None
     tessdata = get_settings().tesseract.prefix or os.environ.get("TESSDATA_PREFIX")
     if tessdata and Path(tessdata).exists():
+        # keep subprocess and pytesseract language lookup on the same tessdata root
         os.environ["TESSDATA_PREFIX"] = tessdata
     return bin_path
 
@@ -151,6 +152,7 @@ def pdf_ocr_decision(path: Path, per_page_chars: list[int] | None = None) -> Ocr
             return OcrDecision(action="ocr_full", reason=f"pypdf_failed: {exc}")
         per_page_chars = []
         for page in reader.pages:
+            # text-layer counts let us OCR only pages whose extracted text is sparse
             try:
                 t = page.extract_text() or ""
             except Exception:
@@ -167,6 +169,7 @@ def pdf_ocr_decision(path: Path, per_page_chars: list[int] | None = None) -> Ocr
         log.debug("pdf_ocr_decision %s: no_ocr (%d pages, %d chars)", path.name, len(per_page_chars), total)
         return OcrDecision(action="no_ocr")
     if len(sparse) <= max(1, int(len(per_page_chars) * settings.ocr.sparse_page_ratio)):
+        # sparse minority pages are cheaper to rescue individually than via full-document OCR
         log.debug("pdf_ocr_decision %s: ocr_pages (%d sparse of %d)", path.name, len(sparse), len(per_page_chars))
         return OcrDecision(action="ocr_pages", pages=sparse, reason="sparse_pages")
     log.debug("pdf_ocr_decision %s: ocr_full (majority sparse, %d/%d)", path.name, len(sparse), len(per_page_chars))
@@ -215,6 +218,7 @@ def run_ocr(path: Path, langs: str | None = None, pages: list[int] | None = None
             pass
         from PIL import Image
         with Image.open(path) as im:
+            # images have no text layer, so OCR is the extraction path
             text = ocr_image(im, langs=langs)
         log.info("ocr done: %s -> %d chars in %dms", path.name, len(text), int((_time.perf_counter() - started) * 1000))
         return text

@@ -30,7 +30,7 @@ log = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Time / file helpers
+# time / file helpers
 # ---------------------------------------------------------------------------
 
 
@@ -51,7 +51,7 @@ def file_modified_iso(path: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Dataclasses
+# dataclasses
 # ---------------------------------------------------------------------------
 
 
@@ -103,7 +103,7 @@ class Doc:
     extra: dict[str, Any] = field(default_factory=dict)
     ocr: OcrInfo = field(default_factory=OcrInfo)
 
-    # populated when read from DB
+    # populated when read from db
     id: int | None = None
 
     def to_row(self) -> dict[str, Any]:
@@ -217,7 +217,7 @@ def _parse_json(s: str | None) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Path normalization
+# path normalization
 # ---------------------------------------------------------------------------
 
 
@@ -231,7 +231,7 @@ def relative_to_root(file_path: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# CRUD
+# crud
 # ---------------------------------------------------------------------------
 
 
@@ -361,11 +361,13 @@ def _recompute_dups_for_hashes(conn: sqlite3.Connection, hashes: Iterable[str]) 
             (hash_value,),
         ).fetchall()
         if len(rows) == 1:
+            # a singleton hash cannot remain marked as duplicate or keep
             if rows[0]["dup"] != "unique":
                 conn.execute("UPDATE docs SET dup = 'unique' WHERE id = ?", (rows[0]["id"],))
                 changed += 1
             continue
         if len(rows) >= 2:
+            # newly discovered siblings default to unapproved duplicate status
             ids = [row["id"] for row in rows if row["dup"] == "unique"]
             if ids:
                 placeholders = ",".join("?" * len(ids))
@@ -405,6 +407,7 @@ def set_dup(path: Path, value: str) -> SetDupResult:
             if sibling.id is None:
                 continue
             if is_in_inbox(sibling.path):
+                # inbox siblings remain queued for triage instead of being silently approved
                 inbox_deferred.append(sibling.path)
                 continue
             _update_dup(conn, sibling.id, value)
@@ -464,7 +467,7 @@ ON CONFLICT(doc_id) DO UPDATE SET
 
 
 # ---------------------------------------------------------------------------
-# EnrichmentResult → Doc translation
+# enrichmentresult → doc translation
 # ---------------------------------------------------------------------------
 
 
@@ -507,6 +510,7 @@ def doc_from_enrichment(
     """Build a fresh :class:`Doc` from enrichment + file metadata."""
     st = path.stat()
     extra: dict[str, Any] = {}
+    # keep fields that have no first-class docs column in the flexible extra payload
     for key in ("amount", "currency", "reason"):
         val = enrichment.get(key)
         if val not in (None, "", "null"):
@@ -534,7 +538,7 @@ def doc_from_enrichment(
 
 
 # ---------------------------------------------------------------------------
-# Markdown render / parse — for ``dnd meta cat`` / ``meta edit`` / ``meta apply``
+# markdown render / parse — for ``dnd meta cat`` / ``meta edit`` / ``meta apply``
 # ---------------------------------------------------------------------------
 
 
@@ -543,6 +547,7 @@ _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
 
 def to_markdown(doc: Doc) -> str:
     """Render a :class:`Doc` to YAML-frontmatter + Summary/Notes sections."""
+    # expose duplicate context read-only so editors can see sibling state
     duplicate_fields = {
         key: value
         for key, value in doc.to_dict(include_duplicates=True).items()
@@ -595,6 +600,7 @@ def _split_body(text: str) -> tuple[str, str]:
     parts = re.split(r"^# (Summary|Notes)\s*\n", text, flags=re.MULTILINE)
     summary, notes = "", ""
     if len(parts) >= 3:
+        # body sections are keyed by headings so users may reorder them safely
         for i in range(1, len(parts), 2):
             heading = parts[i].strip().lower()
             body = parts[i + 1] if i + 1 < len(parts) else ""
@@ -630,6 +636,7 @@ def doc_from_markdown(text: str, *, base: Doc | None = None) -> Doc:
         if value is None:
             return []
         if isinstance(value, str):
+            # accept both database semilists and one-off YAML scalar values
             return from_semilist(value) if ";" in value else [value]
         if isinstance(value, Iterable):
             return [str(v) for v in value if v]

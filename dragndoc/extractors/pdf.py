@@ -113,6 +113,7 @@ def extract(path: Path) -> ExtractedDoc:
 
             section_text = page_text
             if should_ocr_page(page_text):
+                # rescue only sparse pages during extraction; full OCR is handled by pipeline decisions
                 if not tesseract_available():
                     ocr_unavailable = True
                 else:
@@ -125,6 +126,7 @@ def extract(path: Path) -> ExtractedDoc:
             yield section_text
 
     kept = select_pages(_iter_pages(), cfg)
+    # labels preserve the original page number for prompt context after page selection
     sections = [
         Section(label=f"Page {i + 1}", text=text, index=i)
         for i, text in enumerate(kept)

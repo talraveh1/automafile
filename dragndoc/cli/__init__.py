@@ -73,7 +73,7 @@ def main() -> None:  # pragma: no cover
     app()
 
 
-# Side-effect imports register subcommand decorators on the apps defined above.
+# side-effect imports register subcommand decorators on the apps defined above
 from dragndoc.cli import (  # noqa: E402, F401
     digest,
     dirs,

@@ -26,6 +26,7 @@ _FAKE = EnrichmentResult(
 def test_digest_text_file_writes_row(docs_root):
     p = docs_root / "Inbox" / "note.txt"
     p.write_text("Hebrew test שלום", encoding="utf-8")
+    # patch enrichment so the test covers pipeline writes without calling Ollama
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         result = digest_file(p)
     assert result.error is None
@@ -87,6 +88,7 @@ def test_digest_pdf_writes_row_only(docs_root):
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE), \
          patch("dragndoc.pipeline._maybe_run_ocr") as ocr:
         def passthrough(doc, decision):
+            # avoid Tesseract while still exercising the OCR metadata path
             doc.text = "fake text"
             return doc, OcrInfo(decision="ocr_full")
         ocr.side_effect = passthrough

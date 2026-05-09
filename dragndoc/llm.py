@@ -18,14 +18,14 @@ from dragndoc.log import get_logger
 log = get_logger(__name__)
 
 
-# Hebrew Unicode block U+0590..U+05FF — applied character-class style
+# hebrew unicode block U+0590..U+05FF, applied character-class style
 HEBREW_RANGE = "֐-׿"
 HEBREW_QUOTE_RE = re.compile(
     rf'(?<=[{HEBREW_RANGE}])"|"(?=[{HEBREW_RANGE}])'
 )
 HEBREW_GERSHAYIM = "״"
 
-# ASCII printable range used by sanitizer
+# ascii printable quote used by sanitizer
 ASCII_QUOTE = '"'
 
 _TAXONOMY_PATH_PARTS = ("memory", "taxonomy.md")
@@ -80,6 +80,7 @@ def sanitize_excerpt(text: str) -> str:
     """Replace double-quotes adjacent to Hebrew characters with gershayim."""
     if not text:
         return text
+    # reduce quote-heavy Hebrew fragments that commonly confuse JSON output
     return HEBREW_QUOTE_RE.sub(HEBREW_GERSHAYIM, text)
 
 
@@ -99,6 +100,7 @@ def _section_header(section: Section, total_sections: int | None) -> str:
     label = section.label or f"Section {section.index + 1}"
     if total_sections is None:
         return f"--- {label} ---"
+    # keep native page/slide/chapter labels while still exposing total context
     if label.startswith(("Page ", "Slide ", "Chapter ")):
         return f"--- {label} of {total_sections} ---"
     return f"--- {label} ({section.index + 1} of {total_sections}) ---"
@@ -110,6 +112,7 @@ def _render_sections(sections: list[Section], total_sections: int | None) -> str
     if total_sections is None and len(sections) == 1 and sections[0].label is None:
         return sections[0].text
 
+    # deterministic section banners make partial documents legible to the LLM
     blocks = [
         f"{_section_header(section, total_sections)}\n{section.text}"
         for section in sections
@@ -125,6 +128,7 @@ def _build_prompt(doc: ExtractedDoc, hints: dict, taxonomy: str) -> str:
     template_path = Path(__file__).parent / "prompts" / "triage.txt"
     template = template_path.read_text(encoding="utf-8")
     safe_text = sanitize_excerpt(_render_sections(doc.sections, doc.total_sections))
+    # render embedded metadata as soft hints instead of hard classification rules
     hints_text = "\n".join(f"- {k}: {v}" for k, v in (hints or {}).items()) or "(none)"
     return (
         template.replace("{taxonomy}", taxonomy)
@@ -153,6 +157,7 @@ def _ollama_generate(prompt: str, *, extra_options: dict | None = None) -> str:
     }
     log.debug("ollama POST %s model=%s prompt=%dchars", url, settings.ollama.model, len(prompt))
     started = _time.perf_counter()
+    # let HTTP and JSON failures bubble so the caller can return a placeholder result
     resp = requests.post(url, json=body, timeout=300)
     resp.raise_for_status()
     data = resp.json()
@@ -170,6 +175,7 @@ def _strict_parse(raw: str) -> dict | None:
 
 def _repair_parse(raw: str) -> dict | None:
     """Tier 2: escape stray double-quotes inside known string-valued keys."""
+    # known keys are repaired surgically so unrelated malformed JSON still fails this tier
     repaired = STRING_KEY_PATTERN.sub(
         lambda m: '"{key}":"{val}"'.format(
             key=m.group(1),
@@ -202,6 +208,7 @@ _review_RE = re.compile(r'"review"\s*:\s*(true|false)')
 
 def _regex_recover(raw: str) -> dict | None:
     out: dict[str, Any] = {}
+    # recover fields independently so a broken field does not discard the whole response
     for key, pat in _FIELD_REGEXES.items():
         m = pat.search(raw)
         if m:
@@ -241,6 +248,7 @@ def _coerce_str_field(value: Any) -> str | None:
 def _coerce_to_result(parsed: dict, tier: str, raw: str) -> EnrichmentResult:
     if not isinstance(parsed, dict):
         parsed = {}
+    # normalize model variance into the stricter EnrichmentResult shape used downstream
     res = EnrichmentResult(
         title=_coerce_str_field(parsed.get("title")),
         summary=str(parsed.get("summary") or ""),
@@ -285,6 +293,7 @@ def _placeholder_result(raw: str) -> EnrichmentResult:
 
 def parse_with_tiers(raw: str, prompt_for_retry: str | None = None) -> EnrichmentResult:
     """Pure parsing pipeline. Used by tests and by ``enrich``."""
+    # try lossless JSON first, then progressively more tolerant recovery paths
     parsed = _strict_parse(raw)
     if parsed is not None:
         log.debug("llm parse tier=strict")
@@ -304,6 +313,7 @@ def parse_with_tiers(raw: str, prompt_for_retry: str | None = None) -> Enrichmen
             if parsed is not None:
                 log.debug("llm parse tier=retry")
                 return _coerce_to_result(parsed, "retry", retry_raw)
+            # retry output can still be useful even when it is not valid JSON
             partial = _regex_recover(retry_raw)
             if partial:
                 log.debug("llm parse tier=regex (after retry)")

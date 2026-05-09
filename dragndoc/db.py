@@ -224,6 +224,7 @@ def bootstrap_schema(path: Path | None = None) -> None:
             current = _read_ver(conn)
             if current is None:
                 if not had_docs_before_bootstrap:
+                    # brand-new databases get the latest schema in one script
                     conn.executescript(_SCHEMA_SQL)
                     conn.execute(
                         "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('ver', ?)",
@@ -239,6 +240,7 @@ def bootstrap_schema(path: Path | None = None) -> None:
             )
             for from_ver, to_ver, fn in _MIGRATIONS:
                 if current == from_ver:
+                    # migrations are intentionally linear because only released schemas are supported
                     fn(conn)
                     conn.execute(
                         "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('ver', ?)",
@@ -300,10 +302,9 @@ def transaction() -> Iterator[sqlite3.Connection]:
 
 
 # ---------------------------------------------------------------------------
-# Semilist helpers — all multi-valued string columns share this format.
-# Storage is ``';a;b;c;'`` for non-empty (sorted, deduped, ``;``-stripped from
-# values) and ``''`` for empty. Membership: ``LIKE '%;X;%'``. Multi-value
-# AND: combine multiple LIKE clauses with AND. Boolean ops: use FTS5.
+# semilist helpers — all multi-valued string columns share this format
+# storage is ``';a;b;c;'`` for non-empty and ``''`` for empty
+# membership uses ``LIKE '%;X;%'``; boolean search uses FTS5
 # ---------------------------------------------------------------------------
 
 

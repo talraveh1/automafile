@@ -20,9 +20,9 @@ log = get_logger(__name__)
 
 _DEBOUNCE_SECONDS = 5.0
 
-# AUMID = Application User Model ID. Must match the value registered by
+# aumid = Application User Model ID. Must match the value registered by
 # ``dnd toaster install`` under HKCU\Software\Classes\AppUserModelId\<AUMID>.
-# Windows uses it to attribute toasts and look up the display name.
+# windows uses it to attribute toasts and look up the display name
 AUMID = "DragnDoc.Toaster"
 AUMID_REG_PATH = rf"Software\Classes\AppUserModelId\{AUMID}"
 
@@ -78,6 +78,7 @@ class Notifier:
         with self._lock:
             self._pending.append((title, body))
             if self._timer is None:
+                # debounce bursts so a scan does not produce one toast per file
                 self._timer = threading.Timer(_DEBOUNCE_SECONDS, self._flush)
                 self._timer.daemon = True
                 self._timer.start()

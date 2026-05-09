@@ -26,7 +26,7 @@ REPO = Path(__file__).resolve().parent.parent
 VENV = REPO / ".venv"
 SHORTCUT_NAME = "DragnDoc Toaster.lnk"
 
-# AUMID = Application User Model ID. Must be a single-segment dotted name,
+# aumid = Application User Model ID. Must be a single-segment dotted name,
 # 1–129 chars. Windows looks this up under HKCU\Software\Classes\AppUserModelId
 # to attribute toast notifications. Keep this in sync with notifier.AUMID.
 AUMID = "DragnDoc.Toaster"
@@ -62,8 +62,8 @@ def _install_shortcut() -> int:
     target = _shortcut_path()
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    # WScript.Shell is the standard COM interface for creating .lnk files.
-    # Driving it from PowerShell avoids a pywin32 dependency.
+    # wscript.Shell is the standard COM interface for creating .lnk files
+    # driving it from PowerShell avoids a pywin32 dependency
     script = (
         "$ws = New-Object -ComObject WScript.Shell;"
         f"$lnk = $ws.CreateShortcut('{_ps_quote(str(target))}');"

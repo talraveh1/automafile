@@ -57,6 +57,7 @@ def _assert_expected_file_facts(
     expected_size: int | None,
     expected_mtime: str | None,
 ) -> tuple[int, str | None]:
+    # fail fast if a scan candidate changed between planning and digesting
     st = path.stat()
     modified = file_modified_iso(path)
     if expected_size is not None and st.st_size != expected_size:
@@ -223,6 +224,7 @@ def digest_file(
 
 
 def format_result_line(result: DigestResult) -> str:
+    # watcher and CLI share this compact status line
     rel = result.path.name
     return (
         f"{rel} | ocr={result.ocr_decision} | tier={result.llm_tier} "

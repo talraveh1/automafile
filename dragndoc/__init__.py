@@ -3,8 +3,8 @@
 import sys as _sys
 from pathlib import Path as _Path
 
-# Redirect bytecode caches to build/pycache so source trees stay clean.
-# Set before any submodule imports so dragndoc's own .pyc files honor it.
+# redirect bytecode caches to build/pycache so source trees stay clean
+# set before any submodule imports so dragndoc's own .pyc files honor it
 _sys.pycache_prefix = str(_Path(__file__).resolve().parent.parent / "build" / "pycache")
 del _sys, _Path
 

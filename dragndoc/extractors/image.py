@@ -22,7 +22,7 @@ from dragndoc.ocr import ocr_image, tesseract_available
 log = get_logger(__name__)
 
 
-# EXIF sub-IFD tag IDs (PIL exposes these via Image.Exif.get_ifd)
+# exif sub-IFD tag IDs (PIL exposes these via Image.Exif.get_ifd)
 _EXIF_IFD_TAG = 0x8769
 _GPS_IFD_TAG = 0x8825
 
@@ -41,7 +41,7 @@ def _read_exif(im) -> dict[str, Any]:
         name = ExifTags.TAGS.get(tag_id, f"tag_{tag_id}")
         out[name] = value
 
-    # ExifIFD subblock — date taken, exposure, ISO, lens, etc.
+    # exififd subblock — date taken, exposure, ISO, lens, etc
     try:
         sub = exif.get_ifd(_EXIF_IFD_TAG)
     except Exception:
@@ -51,7 +51,7 @@ def _read_exif(im) -> dict[str, Any]:
             name = ExifTags.TAGS.get(tag_id, f"tag_{tag_id}")
             out.setdefault(name, value)
 
-    # GPS subblock — coordinates, altitude, etc.
+    # gps subblock — coordinates, altitude, etc
     try:
         gps = exif.get_ifd(_GPS_IFD_TAG)
     except Exception:
@@ -105,7 +105,7 @@ def extract(path: Path) -> ExtractedDoc:
                     except EOFError:
                         break
                     frame_text = ""
-                    # TODO(vision): if OCR is sparse, optionally describe this frame with a vision model
+                    # todo(vision): if OCR is sparse, optionally describe this frame with a vision model
                     if not tesseract_available():
                         ocr_unavailable = True
                     else:
@@ -117,6 +117,7 @@ def extract(path: Path) -> ExtractedDoc:
                             log.warning("OCR failed for %s frame %d: %s", path, frame_index + 1, exc)
                     yield frame_text
 
+                        # multi-frame images are treated like page sequences for capping and labels
             kept = select_pages(_iter_frames(), cfg)
     except Exception as exc:  # noqa: BLE001
         raise CorruptDocumentError(f"image failed for {path}: {exc}") from exc

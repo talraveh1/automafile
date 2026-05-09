@@ -29,13 +29,11 @@ class ExtractedDoc:
     ocr_pages: list[int] | None = None
     format: str = "unknown"
     error: str | None = None
-    # PDF only: full per-page character counts from the text-layer pass for
+    # pdf only: full per-page character counts from the text-layer pass for
     # kept pages, before OCR and before section trimming
     per_page_chars: list[int] | None = None
-    # Flat key-value dict of metadata the file itself declares (PDF DocInfo +
-    # XMP, OOXML core properties, EXIF, HTML <meta>, EPUB Dublin Core, ...).
-    # Cleaned and length-clipped by ``extractors._meta.collect``. Surfaced to
-    # the LLM as soft context.
+    # flat key-value dict of metadata the file itself declares
+    # cleaned and clipped by ``extractors._meta.collect`` before LLM hinting
     extracted_metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

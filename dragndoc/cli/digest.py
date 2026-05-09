@@ -40,6 +40,7 @@ def digest(
         old = get_by_file(path)
         old_hash = old.hash if old else None
         file_hash = hash_file(path) if path.exists() and path.is_file() else None
+        # pass the hash through so digest_file does not read the file twice
         result = digest_file(path, dry_run=dry_run, force_ocr=force_ocr, file_hash=file_hash)
         if not dry_run and file_hash:
             recompute_dups_for_hashes({h for h in (old_hash, file_hash) if h})
@@ -93,6 +94,7 @@ def _digest_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_
                 if stop_on_error:
                     raise typer.Exit(1)
                 continue
+            # expected facts guard against digesting a file that changed after scan
             result = digest_file(
                 full,
                 dry_run=dry_run,

@@ -36,6 +36,7 @@ def extract(path: Path) -> ExtractedDoc:
 
     raw: dict = {}
     try:
+        # core properties become prompt hints, not authoritative metadata
         cp = doc.core_properties
         for attr in _CORE_ATTRS:
             raw[attr] = getattr(cp, attr, None)

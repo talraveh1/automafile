@@ -13,7 +13,7 @@ log = get_logger(__name__)
 
 
 _POINTER = """\
-# Memory pointer
+# memory pointer
 
 This directory is the project-local memory for Drag'n'Doc.
 
@@ -24,7 +24,7 @@ This directory is the project-local memory for Drag'n'Doc.
 """
 
 _PREFERENCES = """\
-# Preferences
+# preferences
 
 Edit these freely. The `/triage` skill reads them on every run.
 
@@ -44,7 +44,7 @@ naming_convention: "{date} - {correspondent} - {topic}.{ext}"
 """
 
 _TAXONOMY = """\
-# Taxonomy
+# taxonomy
 
 The source of truth for filing. Add or remove freely.
 
@@ -79,7 +79,7 @@ def bootstrap(*, force: bool = False) -> None:
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
     (repo_root / "build").mkdir(parents=True, exist_ok=True)
 
-    # DB: create file + schema if missing
+    # db: create file + schema if missing
     bootstrap_schema(settings.db_path)
 
     # documents tree (only the inbox; category folders appear on first filing)

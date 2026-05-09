@@ -51,7 +51,7 @@ def iter_unblocked_directories(root: Path) -> Iterator[Path]:
         if current != root and current.name.startswith("."):
             continue
         if directory_has_blocking_meta_file(current):
-            # A `.meta` marker file blocks processing of this subtree entirely.
+            # a `.meta` marker file blocks processing of this subtree entirely
             continue
         if current != root and directory_is_opaque(current):
             continue

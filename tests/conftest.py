@@ -8,14 +8,15 @@ from pathlib import Path
 import pytest
 
 
-# Route test-file .pyc caches to build/pycache so __pycache__ folders don't
-# scatter through the source tree. Runs before any test module is imported.
+# route test-file .pyc caches to build/pycache so __pycache__ folders don't
+# scatter through the source tree before any test module is imported
 sys.pycache_prefix = str(Path(__file__).resolve().parent.parent / "build" / "pycache")
 
 
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path, monkeypatch):
     """Each test gets its own DOCS, DATA_DIR, and fresh settings cache."""
+    # mirror the default docs/inbox layout while keeping every test isolated
     docs_root = tmp_path / "docs"
     docs_root.mkdir()
     (docs_root / "Inbox").mkdir()
@@ -24,6 +25,7 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("LOGS_LEVEL", "WARNING")
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     from dragndoc.config import reset_settings
+    # settings are cached globally, so reset before and after each test
     reset_settings()
     yield docs_root
     reset_settings()

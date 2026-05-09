@@ -36,6 +36,7 @@ def extract(path: Path) -> ExtractedDoc:
             for shape in slide.shapes:
                 tf = getattr(shape, "text_frame", None) if shape.has_text_frame else None
                 if tf is not None:
+                    # keep paragraph boundaries while flattening runs within each paragraph
                     for para in tf.paragraphs:
                         line = "".join(run.text for run in para.runs)
                         if line.strip():
@@ -43,6 +44,7 @@ def extract(path: Path) -> ExtractedDoc:
             yield "\n".join(chunks)
 
     kept = select_pages(_iter_slides(), cfg)
+    # slide labels preserve presentation order in the LLM prompt
     sections = [
         Section(label=f"Slide {i + 1}", text=text, index=i)
         for i, text in enumerate(kept)

@@ -111,6 +111,7 @@ def _extract_with_mime(path: Path, mime: str, *, strict: bool) -> ExtractedDoc:
     if extractor is None:
         raise CorruptDocumentError(f"Unsupported MIME type for extraction: {mime}")
     if extractor in _STRICT_AWARE_EXTRACTORS:
+        # only text-like extractors currently distinguish strict from fallback mode
         return extractor.extract(path, strict=strict)
     return extractor.extract(path)
 

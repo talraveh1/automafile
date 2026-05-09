@@ -203,7 +203,7 @@ def _consume(cursor: Cursor, notifier: Notifier, state: Optional[TrayState] = No
         toast = _format_toast(event)
         if toast is not None:
             title, body = toast
-            # Mirror every user-facing notification into the log file so the
+            # mirror every user-facing notification into the log file so the
             # log is a complete record of what was surfaced — independent of
             # mute state and of whatever process emitted the source event.
             log.log(_level_for_title(title), "%s", body)
@@ -219,7 +219,7 @@ def _consume(cursor: Cursor, notifier: Notifier, state: Optional[TrayState] = No
 
 
 # ---------------------------------------------------------------------------
-# Tray menu actions
+# tray menu actions
 # ---------------------------------------------------------------------------
 
 
@@ -357,7 +357,7 @@ def _ensure_dpi_aware() -> None:
         import ctypes
 
         try:
-            # PER_MONITOR_AWARE_V2 = -4. Win10 1703+. Best fidelity
+            # per_monitor_aware_v2 = -4 on Win10 1703+ gives best fidelity
             if ctypes.windll.user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):
                 return
         except (AttributeError, OSError):
@@ -411,7 +411,7 @@ def _launch_triage() -> None:
     mintty = _find_mintty()
     if wt:
         scale = _system_dpi_scale()
-        # default Cascadia Mono ~10×20 px per cell at 96 DPI; chrome ~30/100 px.
+        # default Cascadia Mono ~10×20 px per cell at 96 DPI; chrome ~30/100 px
         # wt scales font with DPI, so the actual window size scales too
         est_w = int((TRIAGE_WIN_COLS * 10 + 30) * scale)
         est_h = int((TRIAGE_WIN_ROWS * 20 + 100) * scale)
@@ -448,7 +448,7 @@ def _count_ready_for_triage() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Tray icon
+# tray icon
 # ---------------------------------------------------------------------------
 
 
@@ -475,7 +475,7 @@ def _make_icon_image(red_dot: bool = False):
     draw.rectangle((arrow_cx - shaft_w // 2, 6, arrow_cx + shaft_w // 2, 20), fill=paper)
     draw.polygon([(arrow_cx - 9, 18), (arrow_cx + 9, 18), (arrow_cx, 28)], fill=paper)
 
-    # document body, sitting below the arrow. Fold in the upper-right corner
+    # document body, sitting below the arrow with a folded upper-right corner
     doc_l, doc_t, doc_r, doc_b = 12, 30, 52, 58
     fold = 9
     body = [
@@ -543,6 +543,7 @@ def _run_with_tray(poll_interval: float) -> None:
                 prev = cursor.last_id
                 cursor = _consume(cursor, notifier, state)
                 if cursor.last_id != prev:
+                    # persist only after successful consumption so restarts do not skip events
                     cursor.save(cursor_file)
                 state.set_action_items(_count_ready_for_triage())
                 refresh_icon(icon)
@@ -627,7 +628,7 @@ def run_toaster(poll_interval: float = POLL_INTERVAL_SECONDS, *, tray: bool = Tr
 
 
 # ---------------------------------------------------------------------------
-# Lifecycle: PID-file based start / stop / status
+# lifecycle: PID-file based start / stop / status
 # ---------------------------------------------------------------------------
 
 
@@ -709,7 +710,7 @@ def start_background(*, tray: bool = True) -> int:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    # wait for the child to write its pid; detect immediate failure.
+    # wait for the child to write its pid; detect immediate failure
     # 10s leaves headroom for cold pythonw.exe startup + dragndoc imports
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
@@ -733,7 +734,7 @@ def stop_toaster(*, timeout: float = 10.0, quiet: bool = False) -> int:
             print("toaster: not running")
         return 0
     # the child runs as a detached pythonw.exe with no console, so
-    # CTRL_BREAK can't reach it; terminate by handle instead
+    # ctrl_break can't reach it; terminate by handle instead
     try:
         terminate_pid(pid)
     except OSError as exc:

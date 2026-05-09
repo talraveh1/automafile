@@ -171,6 +171,7 @@ def _inventory(
         rel = relative_to_root(path)
         details: dict[str, Any] = {"format": ext.lstrip(".")}
         if ext == ".pdf":
+            # pdfs can be unprocessable or OCR-worthy before any full digest runs
             try:
                 decision = pdf_ocr_decision(path)
             except Exception as exc:  # noqa: BLE001
@@ -183,6 +184,7 @@ def _inventory(
                 details["needs_ocr"] = True
                 details["ocr_reason"] = decision.reason or decision.action
         elif ext in IMAGE_EXT and rel not in rows_by_path:
+            # new images have no text layer, so their first digest depends on OCR
             details["needs_ocr"] = True
             details["ocr_reason"] = "image_format"
         try:
@@ -215,6 +217,7 @@ def _hash_candidate(
         return fresh_hashes[rel]
     row = rows_by_path.get(rel)
     if row is not None and _row_facts_match(row, facts):
+        # reuse trusted stored hashes when size and mtime still match
         return row["hash"]
     try:
         fresh_hashes[rel] = hash_file(facts.path)
@@ -237,6 +240,7 @@ def _plan_known_hash_renames(
     claimed_targets: set[str] = set()
     for old_rel in sorted(db_only):
         old_row = rows_by_path[old_rel]
+        # first pass matches missing rows to visible files with the same size and hash
         for rel in sorted((fs_only | both) - claimed_targets):
             facts = fs_facts[rel]
             if facts.size != old_row["size"]:
@@ -269,6 +273,7 @@ def _selective_rehash(
     fresh_hashes: dict[str, str],
     rehash: bool,
 ) -> None:
+    # hash only paths that can affect rename resolution or changed-file detection
     for rel in sorted(fs_only - resolved_targets):
         if rel not in fresh_hashes:
             fresh_hashes[rel] = hash_file(fs_facts[rel].path)
@@ -291,6 +296,7 @@ def _plan_fresh_hash_renames(
     still_unresolved = set(unresolved)
     for old_rel in sorted(unresolved):
         old_row = rows_by_path[old_rel]
+        # second pass uses hashes already computed for new or stale filesystem entries
         for rel, candidate_hash in sorted(fresh_hashes.items()):
             if rel in claimed_targets:
                 continue
@@ -351,6 +357,7 @@ def _apply_reconciliation(
     for plan in plans:
         report.renames.append((plan.old_rel, plan.new_rel))
     if not apply:
+        # dry scans report the proposed state without mutating rows
         for rel in sorted(unresolved):
             row = rows_by_path[rel]
             report.unresolved_orphans.append(
@@ -363,6 +370,7 @@ def _apply_reconciliation(
         for plan in plans:
             facts = fs_facts[plan.new_rel]
             if plan.new_row is None:
+                # simple rename: one stale db row now points at one filesystem file
                 conn.execute(
                     "UPDATE docs SET path = ?, hash = ?, size = ?, modified = ? WHERE id = ?",
                     (plan.new_rel, plan.file_hash, facts.size, facts.mtime, plan.old_row["id"]),
@@ -377,6 +385,7 @@ def _apply_reconciliation(
                 modified=facts.mtime,
             )
             if merged is None:
+                # conflicting live row with different content stays unresolved for human review
                 report.unresolved_orphans.append(
                     OrphanInfo(
                         doc_id=plan.old_row["id"],
@@ -407,6 +416,7 @@ def _apply_reconciliation(
             row = rows_by_path[rel]
             facts = fs_facts[rel]
             if fresh_hashes.get(rel) == row["hash"] and not _row_facts_match(row, facts):
+                # content matched after rehash, so only filesystem facts need refreshing
                 conn.execute(
                     "UPDATE docs SET size = ?, modified = ? WHERE id = ?",
                     (facts.size, facts.mtime, row["id"]),
@@ -445,6 +455,7 @@ def _build_worklist(
     for rel, facts in sorted(fs_facts.items()):
         row = rows_by_path.get(rel)
         if row is None:
+            # files with no row are first-class digest candidates
             file_hash = fresh_hashes.get(rel)
             if file_hash is None:
                 file_hash = hash_file(facts.path)
@@ -454,6 +465,7 @@ def _build_worklist(
 
         file_hash = fresh_hashes.get(rel) or row["hash"]
         if force:
+            # force keeps scan selection simple: every known row becomes digest work
             worklist.changed_files.append(_candidate_for(row, facts, file_hash, "force"))
             continue
         if fresh_hashes.get(rel) and fresh_hashes[rel] != row["hash"]:
@@ -462,6 +474,7 @@ def _build_worklist(
 
         partial = _is_partial(row)
         if partial:
+            # partial rows are re-digested to let the LLM fill missing classification fields
             worklist.partial_metadata.append(
                 _candidate_for(row, facts, file_hash, "partial_metadata", missing_fields=partial)
             )
@@ -479,6 +492,7 @@ def _build_worklist(
                 )
             )
         if _ocr_drift(row, current_engine, current_langs):
+            # ocr engine or language changes can make old extracted text obsolete
             worklist.ocr_review.append(
                 _candidate_for(
                     row,
@@ -510,6 +524,7 @@ def run_scan(
     walk_prefix = _walk_prefix(root, walk_root, subpath)
 
     log.info("scan starting under %s", walk_root)
+    # scan flow: observe dirs, inventory filesystem, reconcile rows, then build digest work
     observe_tree(walk_root, include_root=subpath is not None)
     rows_by_path = _index_existing_rows()
     scoped_rows = _rows_in_scope(rows_by_path, walk_prefix)

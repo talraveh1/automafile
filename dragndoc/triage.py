@@ -63,6 +63,7 @@ def dequeue_by_path(rel_path: str) -> bool:
     dir_row = get_dir(rel_path)
     with transaction() as conn:
         if dir_row is not None and dir_row.mode == "collection":
+            # completing a collection clears queued children as one filing unit
             cur = conn.execute(
                 "DELETE FROM triage WHERE doc_id IN ("
                 "SELECT id FROM docs WHERE path = ? OR path LIKE ? ESCAPE '\\')",
@@ -83,6 +84,7 @@ def _select_real(*, inbox_only: bool) -> list[QueueEntry]:
     )
     params: list[Any] = []
     if inbox_only:
+        # default triage scope keeps existing filed documents out of the queue UI
         sql += " WHERE d.path LIKE ?"
         params.append(f"{_inbox_prefix()}%")
     sql += " ORDER BY q.enqueued_at ASC, q.doc_id ASC"
@@ -92,6 +94,7 @@ def _select_real(*, inbox_only: bool) -> list[QueueEntry]:
 
 
 def _select_synthetic_dups(*, inbox_only: bool) -> list[QueueEntry]:
+    # duplicate rows need review even if no explicit queue row was written
     sql = (
         "SELECT d.* FROM docs_full d "
         "WHERE d.dup = 'dup' "
@@ -123,6 +126,7 @@ def _collection_scope_for_doc(rel_path: str, collection_sources: dict[str, str])
     if rel_path.startswith(inbox_prefix):
         remainder = rel_path[len(inbox_prefix):]
         if "/" in remainder:
+            # inbox collection drops are grouped by their top-level incoming directory
             candidate = f"{inbox_root}/{remainder.split('/', 1)[0]}"
             if candidate in collection_sources:
                 return candidate
@@ -131,6 +135,7 @@ def _collection_scope_for_doc(rel_path: str, collection_sources: dict[str, str])
     for part in rel_path.split("/")[:-1]:
         current = part if not current else f"{current}/{part}"
         if collection_sources.get(current) == "user":
+            # outside the inbox, only user-confirmed collections collapse into one entry
             return current
     return None
 
