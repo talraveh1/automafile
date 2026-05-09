@@ -21,7 +21,7 @@ from dragndoc.log import get_logger
 log = get_logger(__name__)
 
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 
 _DOCS_FULL_SQL = """
@@ -43,6 +43,20 @@ CREATE TABLE IF NOT EXISTS triage (
     enqueued_at TEXT NOT NULL,
     reason      TEXT NOT NULL DEFAULT 'digested'
 )
+"""
+
+_DIRS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS dirs (
+    path         TEXT PRIMARY KEY,
+    mode         TEXT NOT NULL CHECK(mode IN ('collection','bundle','opaque','unknown')),
+    source       TEXT NOT NULL CHECK(source IN ('hardcoded','heuristic','user')),
+    fingerprint  TEXT,
+    listing_id   TEXT,
+    summary      TEXT,
+    decided_at   TEXT NOT NULL,
+    confidence   REAL CHECK(confidence IS NULL OR (confidence >= 0 AND confidence <= 1))
+);
+CREATE INDEX IF NOT EXISTS ix_dirs_path_prefix ON dirs(path);
 """
 
 _SCHEMA_SQL = """
@@ -120,6 +134,8 @@ CREATE INDEX IF NOT EXISTS ix_events_id ON events(id);
 """ + _TRIAGE_TABLE_SQL + """;
 CREATE INDEX IF NOT EXISTS ix_triage_enqueued ON triage(enqueued_at);
 
+""" + _DIRS_TABLE_SQL + """
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -171,8 +187,13 @@ def _migrate_1_to_3(conn: sqlite3.Connection) -> None:
     conn.execute(_DOCS_FULL_SQL)
 
 
+def _migrate_3_to_4(conn: sqlite3.Connection) -> None:
+    conn.executescript(_DIRS_TABLE_SQL)
+
+
 _MIGRATIONS = [
     ("1", "3", _migrate_1_to_3),
+    ("3", "4", _migrate_3_to_4),
 ]
 
 

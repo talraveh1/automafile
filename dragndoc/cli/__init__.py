@@ -48,11 +48,18 @@ triage_app = typer.Typer(
     context_settings=HELP_CONTEXT_SETTINGS,
     help="Inspect / drain the triage queue (filled by digest, drained by /triage).",
 )
+dir_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+    help="Inspect and override tracked directory modes.",
+)
 app.add_typer(watch_app, name="watch")
 app.add_typer(review_app, name="review")
 app.add_typer(meta_app, name="meta")
 app.add_typer(toaster_app, name="toaster")
 app.add_typer(triage_app, name="triage")
+app.add_typer(dir_app, name="dir")
 
 
 @app.callback()
@@ -69,6 +76,7 @@ def main() -> None:  # pragma: no cover
 # Side-effect imports register subcommand decorators on the apps defined above.
 from dragndoc.cli import (  # noqa: E402, F401
     digest,
+    dirs,
     files,
     grep,
     meta,

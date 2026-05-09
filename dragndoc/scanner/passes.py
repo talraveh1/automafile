@@ -10,6 +10,7 @@ from typing import Any
 
 from dragndoc.config import get_settings
 from dragndoc.db import connect, transaction
+from dragndoc.dirs import observe_tree
 from dragndoc.log import get_logger
 from dragndoc.meta_store import (
     _recompute_dups_for_hashes,
@@ -509,6 +510,7 @@ def run_scan(
     walk_prefix = _walk_prefix(root, walk_root, subpath)
 
     log.info("scan starting under %s", walk_root)
+    observe_tree(walk_root, include_root=subpath is not None)
     rows_by_path = _index_existing_rows()
     scoped_rows = _rows_in_scope(rows_by_path, walk_prefix)
     fs_facts, files_seen, skipped, unprocessable = _inventory(root, walk_root, rows_by_path)

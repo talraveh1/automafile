@@ -18,6 +18,9 @@ def _triage_entry_to_dict(entry) -> dict:
     return {
         "doc_id": entry.doc.id,
         "path": entry.doc.path,
+        "scope_path": entry.scope_path,
+        "scope_kind": entry.scope_kind,
+        "member_count": entry.member_count,
         "category": entry.doc.category,
         "title": entry.doc.title,
         "summary": entry.doc.summary,
@@ -32,7 +35,7 @@ def _triage_entry_to_dict(entry) -> dict:
 def triage_count_cmd(
     all_: Annotated[bool, typer.Option("--all", help="Count everything in the queue, not just inbox files.")] = False,
 ) -> None:
-    """Print the number of files awaiting triage."""
+    """Print the number of queued triage items."""
     from dragndoc.triage import count as q_count
 
     typer.echo(str(q_count(inbox_only=not all_)))
@@ -43,7 +46,7 @@ def triage_list_cmd(
     all_: Annotated[bool, typer.Option("--all", help="Show everything queued, not just inbox files.")] = False,
     print_json: Annotated[bool, typer.Option("--json", help="Print full queue as JSON.")] = False,
 ) -> None:
-    """List files awaiting triage, oldest first."""
+    """List queued triage items, oldest first."""
     from dragndoc.triage import list_queue
 
     entries = list_queue(inbox_only=not all_)
@@ -54,7 +57,9 @@ def triage_list_cmd(
         typer.echo("(queue empty)")
         return
     for e in entries:
-        typer.echo(f"{e.enqueued_at}  {e.doc.path}  [{e.doc.category}]  {e.reason}")
+        label = e.scope_path
+        suffix = f" ({e.member_count} docs)" if e.scope_kind == "collection" else ""
+        typer.echo(f"{e.enqueued_at}  {label}{suffix}  [{e.doc.category}]  {e.reason}")
 
 
 @triage_app.command("next")
@@ -75,14 +80,16 @@ def triage_next_cmd(
     if print_json:
         typer.echo(json.dumps(_triage_entry_to_dict(entry), indent=2, ensure_ascii=False, default=str))
     else:
-        typer.echo(f"{entry.doc.path}  [{entry.doc.category}]  enqueued={entry.enqueued_at}  reason={entry.reason}")
+        label = entry.scope_path
+        suffix = f" ({entry.member_count} docs)" if entry.scope_kind == "collection" else ""
+        typer.echo(f"{label}{suffix}  [{entry.doc.category}]  enqueued={entry.enqueued_at}  reason={entry.reason}")
 
 
 @triage_app.command("done")
 def triage_done_cmd(
-    path: Annotated[Path, typer.Argument(help="File path to remove from the queue.")],
+    path: Annotated[Path, typer.Argument(help="File or collection-root path to remove from the queue.")],
 ) -> None:
-    """Remove a file from the triage queue (call after filing it)."""
+    """Remove a file or collection subtree from the triage queue after filing."""
     from dragndoc.meta_store import relative_to_root
     from dragndoc.triage import dequeue_by_path
 

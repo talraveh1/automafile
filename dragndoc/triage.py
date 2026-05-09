@@ -14,8 +14,10 @@ from typing import Any
 
 from dragndoc.config import get_settings
 from dragndoc.db import connect, transaction
+from dragndoc.dirs import get_dir
 from dragndoc.log import get_logger
 from dragndoc.meta_store import Doc, _row_to_doc, utc_now_iso
+from dragndoc.paths import like_child_pattern, normalize
 
 
 log = get_logger(__name__)
@@ -26,6 +28,13 @@ class QueueEntry:
     doc: Doc
     enqueued_at: str
     reason: str
+    scope_path: str = ""
+    scope_kind: str = "doc"
+    member_count: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.scope_path:
+            self.scope_path = self.doc.path
 
 
 def _inbox_prefix() -> str:
@@ -50,11 +59,20 @@ def dequeue_by_doc_id(doc_id: int) -> bool:
 
 
 def dequeue_by_path(rel_path: str) -> bool:
+    rel_path = normalize(rel_path)
+    dir_row = get_dir(rel_path)
     with transaction() as conn:
-        cur = conn.execute(
-            "DELETE FROM triage WHERE doc_id = (SELECT id FROM docs WHERE path = ?)",
-            (rel_path,),
-        )
+        if dir_row is not None and dir_row.mode == "collection":
+            cur = conn.execute(
+                "DELETE FROM triage WHERE doc_id IN ("
+                "SELECT id FROM docs WHERE path = ? OR path LIKE ? ESCAPE '\\')",
+                (rel_path, like_child_pattern(rel_path)),
+            )
+        else:
+            cur = conn.execute(
+                "DELETE FROM triage WHERE doc_id = (SELECT id FROM docs WHERE path = ?)",
+                (rel_path,),
+            )
     return cur.rowcount > 0
 
 
@@ -92,9 +110,72 @@ def _select_synthetic_dups(*, inbox_only: bool) -> list[QueueEntry]:
     ]
 
 
+def _collection_sources() -> dict[str, str]:
+    with connect(readonly=True) as conn:
+        rows = conn.execute("SELECT path, source FROM dirs WHERE mode = 'collection'").fetchall()
+    return {str(row["path"]): str(row["source"]) for row in rows}
+
+
+def _collection_scope_for_doc(rel_path: str, collection_sources: dict[str, str]) -> str | None:
+    rel_path = normalize(rel_path)
+    inbox_root = get_settings().inbox.rstrip("/")
+    inbox_prefix = f"{inbox_root}/"
+    if rel_path.startswith(inbox_prefix):
+        remainder = rel_path[len(inbox_prefix):]
+        if "/" in remainder:
+            candidate = f"{inbox_root}/{remainder.split('/', 1)[0]}"
+            if candidate in collection_sources:
+                return candidate
+
+    current = ""
+    for part in rel_path.split("/")[:-1]:
+        current = part if not current else f"{current}/{part}"
+        if collection_sources.get(current) == "user":
+            return current
+    return None
+
+
+def _collapse_collection_entries(entries: list[QueueEntry]) -> list[QueueEntry]:
+    if not entries:
+        return entries
+
+    collection_sources = _collection_sources()
+    if not collection_sources:
+        return entries
+
+    collapsed: list[QueueEntry] = []
+    by_scope: dict[str, QueueEntry] = {}
+    for entry in entries:
+        scope_path = _collection_scope_for_doc(entry.doc.path, collection_sources)
+        if scope_path is None:
+            entry.scope_path = entry.doc.path
+            entry.scope_kind = "doc"
+            entry.member_count = 1
+            collapsed.append(entry)
+            continue
+
+        grouped = by_scope.get(scope_path)
+        if grouped is None:
+            grouped = QueueEntry(
+                doc=entry.doc,
+                enqueued_at=entry.enqueued_at,
+                reason=entry.reason,
+                scope_path=scope_path,
+                scope_kind="collection",
+                member_count=1,
+            )
+            by_scope[scope_path] = grouped
+            collapsed.append(grouped)
+            continue
+
+        grouped.member_count += 1
+    return collapsed
+
+
 def _select(*, inbox_only: bool, limit: int | None) -> list[QueueEntry]:
     out = _select_real(inbox_only=inbox_only) + _select_synthetic_dups(inbox_only=inbox_only)
     out.sort(key=lambda entry: (entry.enqueued_at or "", entry.doc.id or 0))
+    out = _collapse_collection_entries(out)
     return out[:limit] if limit is not None else out
 
 

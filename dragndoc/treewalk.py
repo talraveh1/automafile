@@ -11,12 +11,21 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
+from dragndoc.dirs import OPAQUE_DIR_NAMES, get_dir
+
 
 BLOCK_MARKER_FILENAME = ".meta"
 
 
 def directory_has_blocking_meta_file(directory: Path) -> bool:
     return (directory / BLOCK_MARKER_FILENAME).is_file()
+
+
+def directory_is_opaque(directory: Path) -> bool:
+    row = get_dir(directory)
+    if row is not None:
+        return row.mode == "opaque"
+    return directory.name.lower() in OPAQUE_DIR_NAMES
 
 
 def is_in_blocked_subtree(path: Path, *, stop_at: Path | None = None) -> bool:
@@ -43,6 +52,8 @@ def iter_unblocked_directories(root: Path) -> Iterator[Path]:
             continue
         if directory_has_blocking_meta_file(current):
             # A `.meta` marker file blocks processing of this subtree entirely.
+            continue
+        if current != root and directory_is_opaque(current):
             continue
 
         yield current

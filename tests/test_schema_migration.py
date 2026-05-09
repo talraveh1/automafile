@@ -86,9 +86,10 @@ def test_schema_migration_v1_to_v3(docs_root):
         row = conn.execute("SELECT dup FROM docs WHERE path = 'Inbox/a.txt'").fetchone()
         queued = conn.execute("SELECT reason FROM triage WHERE doc_id = 1").fetchone()
         view = conn.execute("SELECT dup FROM docs_full WHERE path = 'Inbox/a.txt'").fetchone()
-    assert ver["value"] == "3"
+    assert ver["value"] == "4"
     assert "dup" in columns
     assert "triage" in tables
+    assert "dirs" in tables
     assert "triage_queue" not in tables
     assert row["dup"] == "unique"
     assert queued["reason"] == "digested"
@@ -103,7 +104,8 @@ def test_schema_migration_fresh_db(docs_root):
     with connect(readonly=True) as conn:
         ver = conn.execute("SELECT value FROM schema_meta WHERE key = 'ver'").fetchone()
         tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-    assert ver["value"] == "3"
+    assert ver["value"] == "4"
     assert "docs" in tables
+    assert "dirs" in tables
     assert "triage" in tables
     assert "triage_queue" not in tables

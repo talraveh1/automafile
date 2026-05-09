@@ -23,6 +23,7 @@ import yaml
 from dragndoc.config import get_settings
 from dragndoc.db import connect, from_semilist, to_semilist, transaction
 from dragndoc.log import get_logger
+from dragndoc.paths import normalize
 
 
 log = get_logger(__name__)
@@ -226,10 +227,7 @@ def relative_to_root(file_path: Path) -> str:
     Falls back to the absolute path string if the file lives outside the root.
     """
     settings = get_settings()
-    try:
-        return str(file_path.resolve().relative_to(settings.docs.resolve())).replace("\\", "/")
-    except ValueError:
-        return str(file_path).replace("\\", "/")
+    return normalize(file_path, root=settings.docs)
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +236,7 @@ def relative_to_root(file_path: Path) -> str:
 
 
 def get_by_path(rel_path: str) -> Doc | None:
+    rel_path = normalize(rel_path)
     with connect(readonly=True) as conn:
         row = conn.execute("SELECT * FROM docs_full WHERE path = ?", (rel_path,)).fetchone()
     return _row_to_doc(row) if row else None
@@ -261,6 +260,7 @@ def all_docs() -> list[Doc]:
 
 def upsert(doc: Doc) -> int:
     """Insert or update ``doc`` (keyed by ``path``); upsert OCR row too. Returns docs.id."""
+    doc.path = normalize(doc.path)
     row = doc.to_row()
     with transaction() as conn:
         existing = conn.execute("SELECT id FROM docs WHERE path = ?", (row["path"],)).fetchone()
@@ -280,17 +280,21 @@ def upsert(doc: Doc) -> int:
 
 def update_path(old: str, new: str) -> None:
     """Rename a row's path (used by ``mv``/``filer``)."""
+    old = normalize(old)
+    new = normalize(new)
     with transaction() as conn:
         conn.execute("UPDATE docs SET path = ? WHERE path = ?", (new, old))
 
 
 def delete_by_path(rel_path: str) -> bool:
+    rel_path = normalize(rel_path)
     with transaction() as conn:
         cur = conn.execute("DELETE FROM docs WHERE path = ?", (rel_path,))
     return cur.rowcount > 0
 
 
 def mark_digested(rel_path: str, *, modified: str | None) -> None:
+    rel_path = normalize(rel_path)
     with transaction() as conn:
         conn.execute(
             "UPDATE docs SET digested = ?, modified = ? WHERE path = ?",
