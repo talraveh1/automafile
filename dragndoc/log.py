@@ -5,15 +5,19 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+from threading import Lock
+
+from loguru import logger as _loguru_logger
 
 from dragndoc.config import get_settings
 
 
 _configured = False
+_LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} {level:<7} {extra[name]}: {message}{exception}"
 
 
-class LineRotatingFileHandler(logging.FileHandler):
-    """File handler that rotates after a configurable number of lines.
+class LineRotatingFileSink:
+    """File sink that rotates after a configurable number of lines.
 
     Backups are named ``<base>.1`` (most recent) ... ``<base>.<N-1>`` (oldest);
     the active file is ``<base>``. ``max_files`` is the total number of files
@@ -27,34 +31,45 @@ class LineRotatingFileHandler(logging.FileHandler):
         max_files: int,
         encoding: str = "utf-8",
     ) -> None:
-        super().__init__(filename, encoding=encoding)
+        self.path = filename
         self.max_lines = max_lines
         self.max_files = max_files
+        self.encoding = encoding
+        self._lock = Lock()
         self._line_count = self._count_existing_lines()
+        self._stream = self._open()
+
+    def _open(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        return self.path.open("a", encoding=self.encoding)
 
     def _count_existing_lines(self) -> int:
         try:
-            with open(self.baseFilename, "rb") as f:
+            with self.path.open("rb") as f:
                 return sum(1 for _ in f)
         except OSError:
             return 0
 
-    def emit(self, record: logging.LogRecord) -> None:
-        super().emit(record)
-        try:
-            msg = self.format(record)
-            self._line_count += msg.count("\n") + 1
+    def write(self, message: str) -> None:
+        with self._lock:
+            self._stream.write(message)
+            self._stream.flush()
+            self._line_count += max(1, len(message.splitlines()))
             if self.max_lines > 0 and self._line_count >= self.max_lines:
                 self._rotate()
-        except Exception:  # noqa: BLE001
-            self.handleError(record)
+
+    def flush(self) -> None:
+        with self._lock:
+            self._stream.flush()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._stream.close()
 
     def _rotate(self) -> None:
-        if self.stream is not None:
-            self.stream.close()
-            self.stream = None  # type: ignore[assignment]
+        self._stream.close()
 
-        base = Path(self.baseFilename)
+        base = self.path
         backups_to_keep = max(self.max_files - 1, 0)
 
         # Drop anything beyond what we want to keep.
@@ -74,13 +89,32 @@ class LineRotatingFileHandler(logging.FileHandler):
                 src.replace(dst)
 
         # Move the current file to .1, or just drop it if no backups are kept.
-        if backups_to_keep >= 1:
-            base.replace(base.with_name(base.name + ".1"))
-        else:
-            base.unlink(missing_ok=True)
+        if base.exists():
+            if backups_to_keep >= 1:
+                base.replace(base.with_name(base.name + ".1"))
+            else:
+                base.unlink(missing_ok=True)
 
         self._line_count = 0
-        self.stream = self._open()
+        self._stream = self._open()
+
+
+class LoguruForwardingHandler(logging.Handler):
+    """Forward stdlib logging records into the configured Loguru sinks."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level: str | int = record.levelname
+            try:
+                _loguru_logger.level(record.levelname)
+            except ValueError:
+                level = record.levelno
+
+            _loguru_logger.bind(name=record.name).opt(
+                exception=record.exc_info,
+            ).log(level, record.getMessage())
+        except Exception:  # noqa: BLE001
+            self.handleError(record)
 
 
 def setup_logging(level: str | None = None) -> None:
@@ -90,29 +124,32 @@ def setup_logging(level: str | None = None) -> None:
     settings = get_settings()
     settings.logs_dir.mkdir(parents=True, exist_ok=True)
     log_level = level or settings.logs.level
-    handler_console = logging.StreamHandler(stream=sys.stderr)
-    handler_console.setFormatter(
-        logging.Formatter(
-            fmt="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+    _loguru_logger.remove()
+    _loguru_logger.add(
+        sys.stderr,
+        level=log_level,
+        format=_LOG_FORMAT,
+        backtrace=False,
+        diagnose=False,
+        colorize=False,
     )
-    handlers: list[logging.Handler] = [handler_console]
     try:
-        handler_file = LineRotatingFileHandler(
-            settings.logs_dir / "dragndoc.log",
-            max_lines=settings.logs.max_lines,
-            max_files=settings.logs.max_files,
+        _loguru_logger.add(
+            LineRotatingFileSink(
+                settings.logs_dir / "dragndoc.log",
+                max_lines=settings.logs.max_lines,
+                max_files=settings.logs.max_files,
+            ),
+            level=log_level,
+            format=_LOG_FORMAT,
+            backtrace=False,
+            diagnose=False,
+            colorize=False,
         )
-        handler_file.setFormatter(handler_console.formatter)
-        handlers.append(handler_file)
     except OSError as exc:
-        handler_console.handle(logging.LogRecord(
-            name=__name__, level=logging.WARNING, pathname=__file__, lineno=0,
-            msg="File logging disabled: %s", args=(exc,), exc_info=None,
-        ))
+        _loguru_logger.bind(name=__name__).warning("File logging disabled: {}", exc)
     root = logging.getLogger()
-    root.handlers = handlers
+    root.handlers = [LoguruForwardingHandler()]
     root.setLevel(log_level)
     _configured = True
 
