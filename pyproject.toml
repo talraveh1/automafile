@@ -36,6 +36,7 @@ dependencies = [
   "windows-toasts>=1.1; platform_system=='Windows'",
   "pystray>=0.19; platform_system=='Windows'",
   "PySide6>=6.7",
+  "squigglelog @ git+https://github.com/talraveh1/squigglelog.git",
 ]
 
 [project.optional-dependencies]
