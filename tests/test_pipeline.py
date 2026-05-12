@@ -62,10 +62,9 @@ def test_digest_file_with_hash_skips_internal_hash(docs_root):
     assert doc.hash == "sha256:provided"
 
 
-def test_digest_skips_blocked_meta_tree(docs_root):
-    blocked_dir = docs_root / "Inbox" / "bundle"
+def test_digest_skips_opaque_subtree(docs_root):
+    blocked_dir = docs_root / "Inbox" / ".venv"
     blocked_dir.mkdir(parents=True, exist_ok=True)
-    (blocked_dir / ".meta").write_text("marker", encoding="utf-8")
 
     p = blocked_dir / "note.txt"
     p.write_text("hi", encoding="utf-8")
@@ -73,7 +72,7 @@ def test_digest_skips_blocked_meta_tree(docs_root):
     with patch("dragndoc.pipeline.enrich", return_value=_FAKE):
         result = digest_file(p)
 
-    assert result.error == "blocked_by_meta_file"
+    assert result.error == "blocked_opaque_subtree"
     assert result.metadata_target == "skipped"
     assert get_by_file(p) is None
 

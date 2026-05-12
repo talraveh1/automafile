@@ -1,9 +1,11 @@
-"""Helpers for walking the documents tree without entering blocked subtrees.
+"""Helpers for walking the documents tree without entering opaque subtrees.
 
-A user can drop a file literally named ``.meta`` into a directory to mark
-that whole subtree as "don't process" — useful for bundle directories or
-private folders. The marker is a *file*, not the legacy sidecar
-*directory* (which has been deleted in the DB-based layout).
+A directory is opaque if any of these apply:
+
+- its name starts with ``.`` (e.g. ``.venv``, ``.git``)
+- its lowercased name is in :data:`OPAQUE_DIR_NAMES` (e.g. ``node_modules``)
+- the ``dirs`` table records it with ``mode = 'opaque'`` (set via
+  ``dnd dirs set <path> opaque``)
 """
 
 from __future__ import annotations
@@ -14,29 +16,24 @@ from pathlib import Path
 from dragndoc.dirs import OPAQUE_DIR_NAMES, get_dir
 
 
-BLOCK_MARKER_FILENAME = ".meta"
-
-
-def directory_has_blocking_meta_file(directory: Path) -> bool:
-    return (directory / BLOCK_MARKER_FILENAME).is_file()
-
-
 def directory_is_opaque(directory: Path) -> bool:
+    if directory.name.startswith("."):
+        return True
+    if directory.name.lower() in OPAQUE_DIR_NAMES:
+        return True
     row = get_dir(directory)
-    if row is not None:
-        return row.mode == "opaque"
-    return directory.name.lower() in OPAQUE_DIR_NAMES
+    return row is not None and row.mode == "opaque"
 
 
-def is_in_blocked_subtree(path: Path, *, stop_at: Path | None = None) -> bool:
+def is_in_opaque_subtree(path: Path, *, stop_at: Path | None = None) -> bool:
     current = path if path.is_dir() else path.parent
     stop = stop_at.resolve() if stop_at is not None else None
 
     while True:
-        if directory_has_blocking_meta_file(current):
-            return True
         if stop is not None and current.resolve() == stop:
             return False
+        if directory_is_opaque(current):
+            return True
         parent = current.parent
         if parent == current:
             return False
@@ -48,11 +45,6 @@ def iter_unblocked_directories(root: Path) -> Iterator[Path]:
 
     while stack:
         current = stack.pop()
-        if current != root and current.name.startswith("."):
-            continue
-        if directory_has_blocking_meta_file(current):
-            # a `.meta` marker file blocks processing of this subtree entirely
-            continue
         if current != root and directory_is_opaque(current):
             continue
 
@@ -67,8 +59,6 @@ def iter_unblocked_directories(root: Path) -> Iterator[Path]:
             continue
 
         for child in reversed(child_dirs):
-            if child.name.startswith("."):
-                continue
             stack.append(child)
 
 

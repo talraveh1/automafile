@@ -30,7 +30,7 @@ from dragndoc.ocr import (
     run_ocr,
     tesseract_available,
 )
-from dragndoc.treewalk import is_in_blocked_subtree
+from dragndoc.treewalk import is_in_opaque_subtree
 
 
 log = get_logger(__name__)
@@ -125,10 +125,10 @@ def _check_digestible(path: Path, settings) -> None:
     if not path.exists() or not path.is_file():
         log.error("Cannot digest %s: missing_or_not_file", path)
         raise _DigestAbort("missing_or_not_file")
-    if is_in_blocked_subtree(path, stop_at=settings.docs):
+    if is_in_opaque_subtree(path, stop_at=settings.docs):
         # respect directory-level opt-outs before any extraction, OCR, or hashing work starts
-        log.info("Skipping %s: ancestor directory contains .meta marker file", path)
-        raise _DigestAbort("blocked_by_meta_file", metadata_target="skipped")
+        log.info("Skipping %s: ancestor directory is opaque", path)
+        raise _DigestAbort("blocked_opaque_subtree", metadata_target="skipped")
 
 
 def _extract_or_abort(path: Path) -> ExtractedDoc:

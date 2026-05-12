@@ -71,6 +71,7 @@ class TrayState:
     notifications_enabled: bool = True
     action_items: int = 0
     running_label: Optional[str] = None  # "Digesting foo.pdf", "Scanning…", or None for idle
+    watcher_state: str = "idle"  # "running" | "stopped" | "idle"
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def record_notification(self, title: str, body: str) -> None:
@@ -88,6 +89,18 @@ class TrayState:
     def set_running(self, label: Optional[str]) -> None:
         with self._lock:
             self.running_label = label
+
+    def set_watcher_state(self, state: str) -> None:
+        with self._lock:
+            self.watcher_state = state
+
+    def watcher_state_text(self) -> str:
+        with self._lock:
+            return self.watcher_state
+
+    def is_watcher_running(self) -> bool:
+        with self._lock:
+            return self.watcher_state == "running"
 
     def toggle_notifications(self) -> bool:
         with self._lock:
@@ -447,27 +460,44 @@ def _count_ready_for_triage() -> int:
         return 0
 
 
+def _watcher_state() -> str:
+    """Current supervisor state: "running", "stopped", or "idle"."""
+    try:
+        from dragndoc.runtime import status_snapshot as _runtime_status
+
+        return str(_runtime_status().get("state") or "idle")
+    except Exception as exc:  # noqa: BLE001
+        log.debug("Watcher status check failed: %s", exc)
+        return "idle"
+
+
 # ---------------------------------------------------------------------------
 # tray icon
 # ---------------------------------------------------------------------------
 
 
-def _make_icon_image(red_dot: bool = False):
+def _make_icon_image(red_dot: bool = False, watcher_down: bool = False):
     """Generate a 64×64 RGBA icon: a stylized document with a folded corner
-    sitting on a blue rounded-square tile. ``red_dot`` overlays a badge in
-    the upper-right corner to indicate unhandled events."""
+    sitting on a rounded-square tile. ``red_dot`` overlays a badge in the
+    upper-right corner to indicate unhandled events. ``watcher_down`` swaps
+    the tile to gray so a glance at the tray reveals the watcher is off."""
     from PIL import Image, ImageDraw
 
     size = 64
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    blue = (37, 99, 235, 255)
+    if watcher_down:
+        tile = (120, 120, 120, 255)
+        fold_shadow = (220, 220, 220, 255)
+        text_line = (120, 120, 120, 200)
+    else:
+        tile = (37, 99, 235, 255)
+        fold_shadow = (210, 220, 240, 255)
+        text_line = (37, 99, 235, 200)
     paper = (255, 255, 255, 255)
-    fold_shadow = (210, 220, 240, 255)
-    text_line = (37, 99, 235, 200)
 
-    draw.rounded_rectangle((2, 2, size - 2, size - 2), radius=12, fill=blue)
+    draw.rounded_rectangle((2, 2, size - 2, size - 2), radius=12, fill=tile)
 
     # downward "drop" arrow above the document, in white on the blue tile
     arrow_cx = 32
@@ -524,17 +554,27 @@ def _run_with_tray(poll_interval: float) -> None:
 
     cursor_file = cursor_path()
     state = TrayState()
+    state.set_watcher_state(_watcher_state())
     cursor = _initial_cursor(cursor_file)
     notifier = Notifier()
     stop_event = threading.Event()
 
-    icon_plain = _make_icon_image(red_dot=False)
-    icon_alert = _make_icon_image(red_dot=True)
+    icon_plain_up = _make_icon_image(red_dot=False, watcher_down=False)
+    icon_alert_up = _make_icon_image(red_dot=True, watcher_down=False)
+    icon_plain_down = _make_icon_image(red_dot=False, watcher_down=True)
+    icon_alert_down = _make_icon_image(red_dot=True, watcher_down=True)
 
     def refresh_icon(icon) -> None:
-        target = icon_alert if state.has_action_items() else icon_plain
+        watcher_ok = state.is_watcher_running()
+        if state.has_action_items():
+            target = icon_alert_up if watcher_ok else icon_alert_down
+        else:
+            target = icon_plain_up if watcher_ok else icon_plain_down
         if icon.icon is not target:
             icon.icon = target
+        tooltip = f"Drag'n'Doc Toaster — Watcher: {state.watcher_state_text()}"
+        if icon.title != tooltip:
+            icon.title = tooltip
 
     def poll_loop(icon) -> None:
         nonlocal cursor
@@ -546,6 +586,7 @@ def _run_with_tray(poll_interval: float) -> None:
                     # persist only after successful consumption so restarts do not skip events
                     cursor.save(cursor_file)
                 state.set_action_items(_count_ready_for_triage())
+                state.set_watcher_state(_watcher_state())
                 refresh_icon(icon)
             except Exception as exc:  # noqa: BLE001
                 log.exception("Toaster poll error: %s", exc)
@@ -567,6 +608,7 @@ def _run_with_tray(poll_interval: float) -> None:
         icon.stop()
 
     menu = Menu(
+        Item(lambda _item: f"Watcher: {state.watcher_state_text()}", None, enabled=False),
         Item(lambda _item: state.status_text(), None, enabled=False),
         Menu.SEPARATOR,
         Item("Triage", on_triage),
@@ -580,7 +622,9 @@ def _run_with_tray(poll_interval: float) -> None:
         Item("Exit", on_exit),
     )
 
-    icon = pystray.Icon("dragndoc", icon_plain, "Drag'n'Doc Toaster", menu=menu)
+    initial_icon = icon_plain_up if state.is_watcher_running() else icon_plain_down
+    initial_tooltip = f"Drag'n'Doc Toaster — Watcher: {state.watcher_state_text()}"
+    icon = pystray.Icon("dragndoc", initial_icon, initial_tooltip, menu=menu)
 
     poll_thread = threading.Thread(target=poll_loop, args=(icon,), name="toaster-poll", daemon=True)
     poll_thread.start()

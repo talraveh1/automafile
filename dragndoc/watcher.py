@@ -21,7 +21,7 @@ from dragndoc.log import get_logger
 from dragndoc.pipeline import digest_file, format_result_line
 from dragndoc.scanner import ContentChanged, NewFile, NoChange, Renamed, reconcile_single
 from dragndoc.meta_store import recompute_dups_for_hashes
-from dragndoc.treewalk import BLOCK_MARKER_FILENAME, is_in_blocked_subtree
+from dragndoc.treewalk import is_in_opaque_subtree
 from dragndoc.triage import count as triage_count
 
 
@@ -53,10 +53,10 @@ class _InboxHandler(FileSystemEventHandler):
 
     def _maybe_process(self, path: Path) -> None:
         settings = get_settings()
-        if path.name == BLOCK_MARKER_FILENAME:
+        if path.name.startswith("."):
             return
-        if is_in_blocked_subtree(path, stop_at=settings.docs):
-            log.info("Skipping new file under blocked subtree: %s", path)
+        if is_in_opaque_subtree(path, stop_at=settings.docs):
+            log.info("Skipping new file under opaque subtree: %s", path)
             return
         if path.suffix.lower() in {".tmp", ".part", ".crdownload"}:
             return

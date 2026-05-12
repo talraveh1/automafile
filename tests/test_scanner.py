@@ -35,13 +35,12 @@ def test_run_scan_flags_unrowed_text_file(docs_root):
     assert any(f["relative_path"].endswith("note.txt") for f in wl.files_needing_metadata)
 
 
-def test_run_scan_skips_subtree_with_meta_file_marker(docs_root):
+def test_run_scan_skips_opaque_subtree(docs_root):
     keep = docs_root / "Inbox" / "keep.txt"
     keep.write_text("keep", encoding="utf-8")
 
-    blocked_dir = docs_root / "Inbox" / "bundle"
+    blocked_dir = docs_root / "Inbox" / ".venv"
     blocked_dir.mkdir(parents=True, exist_ok=True)
-    (blocked_dir / ".meta").write_text("marker", encoding="utf-8")
 
     skipped = blocked_dir / "nested" / "skip.txt"
     skipped.parent.mkdir(parents=True, exist_ok=True)
@@ -52,24 +51,23 @@ def test_run_scan_skips_subtree_with_meta_file_marker(docs_root):
 
     assert wl.files_seen == 1
     assert "Inbox/keep.txt" in rels
-    assert not any("bundle/" in rel for rel in rels)
+    assert not any(".venv/" in rel for rel in rels)
 
 
-def test_run_scan_subpath_does_not_check_parent_meta_marker(docs_root):
-    blocked_dir = docs_root / "Inbox" / "bundle"
+def test_run_scan_subpath_overrides_parent_opacity(docs_root):
+    blocked_dir = docs_root / "Inbox" / ".venv"
     blocked_dir.mkdir(parents=True, exist_ok=True)
-    (blocked_dir / ".meta").write_text("marker", encoding="utf-8")
 
     nested = blocked_dir / "nested"
     nested.mkdir(parents=True, exist_ok=True)
     target = nested / "note.txt"
     target.write_text("scan me", encoding="utf-8")
 
-    wl = run_scan(subpath=Path("Inbox/bundle/nested"))
+    wl = run_scan(subpath=Path("Inbox/.venv/nested"))
     rels = [entry["relative_path"] for entry in wl.files_needing_metadata]
 
     assert wl.files_seen == 1
-    assert rels == ["Inbox/bundle/nested/note.txt"]
+    assert rels == ["Inbox/.venv/nested/note.txt"]
 
 
 def test_run_scan_logs_directories_at_info(docs_root, caplog):
