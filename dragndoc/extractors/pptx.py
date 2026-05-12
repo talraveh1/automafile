@@ -22,11 +22,11 @@ def extract(path: Path) -> ExtractedDoc:
     try:
         from pptx import Presentation
     except ImportError as exc:
-        raise CorruptDocumentError("python-pptx is not installed") from exc
+        raise CorruptDocumentError("Python-pptx is not installed") from exc
     try:
         pres = Presentation(str(path))
     except Exception as exc:  # noqa: BLE001
-        raise CorruptDocumentError(f"pptx failed for {path}: {exc}") from exc
+        raise CorruptDocumentError(f"Pptx failed for {path}: {exc}") from exc
 
     cfg = CapConfig.from_settings(get_settings())
 

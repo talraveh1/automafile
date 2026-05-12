@@ -59,7 +59,7 @@ class Notifier:
         try:
             from windows_toasts import WindowsToaster
         except Exception as exc:  # noqa: BLE001
-            log.warning("windows-toasts import failed (%s); toasts will print to stdout.", exc)
+            log.warning("Windows-toasts import failed (%s); toasts will print to stdout.", exc)
             return None
         if not _aumid_is_registered():
             log.warning(

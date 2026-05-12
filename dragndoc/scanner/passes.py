@@ -140,12 +140,12 @@ def _resolve_walk_root(root: Path, subpath: Path | None) -> Path:
     if subpath is None:
         return root
     if subpath.is_absolute():
-        raise ValueError(f"subpath must be relative: {subpath}")
+        raise ValueError(f"Subpath must be relative: {subpath}")
     walk_root = (root / subpath).resolve()
     if not walk_root.is_relative_to(root.resolve()):
-        raise ValueError(f"subpath escapes docs root: {subpath}")
+        raise ValueError(f"Subpath escapes docs root: {subpath}")
     if not walk_root.exists():
-        raise FileNotFoundError(f"subpath does not exist: {walk_root}")
+        raise FileNotFoundError(f"Subpath does not exist: {walk_root}")
     return walk_root
 
 
@@ -162,7 +162,7 @@ def _inventory(
     for path in iter_unblocked_files(walk_root):
         if path.parent != current_directory:
             current_directory = path.parent
-            log.info("scan: entering %s", current_directory)
+            log.info("Scan: entering %s", current_directory)
         files_seen += 1
         ext = path.suffix.lower()
         if ext not in SUPPORTED_EXT:
@@ -523,7 +523,7 @@ def run_scan(
     walk_root = _resolve_walk_root(root, subpath)
     walk_prefix = _walk_prefix(root, walk_root, subpath)
 
-    log.info("scan starting under %s", walk_root)
+    log.info("Scan starting under %s", walk_root)
     # scan flow: observe dirs, inventory filesystem, reconcile rows, then build digest work
     observe_tree(walk_root, include_root=subpath is not None)
     rows_by_path = _index_existing_rows()

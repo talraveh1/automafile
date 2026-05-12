@@ -118,7 +118,7 @@ def extract(path: Path) -> ExtractedDoc:
             # multi-frame images are treated like page sequences for capping and labels
             kept = select_pages(_iter_frames(), cfg)
     except Exception as exc:  # noqa: BLE001
-        raise CorruptDocumentError(f"image failed for {path}: {exc}") from exc
+        raise CorruptDocumentError(f"Image failed for {path}: {exc}") from exc
 
     if n_frames == 1:
         sections = [Section(label=None, text=kept[0] if kept else "", index=0)]

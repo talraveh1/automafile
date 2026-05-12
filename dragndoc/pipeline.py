@@ -59,9 +59,9 @@ def _assert_expected_file_facts(
     st = path.stat()
     modified = file_modified_iso(path)
     if expected_size is not None and st.st_size != expected_size:
-        raise ValueError(f"file size changed while digesting {path}: expected {expected_size}, got {st.st_size}")
+        raise ValueError(f"File size changed while digesting {path}: expected {expected_size}, got {st.st_size}")
     if expected_mtime is not None and modified != expected_mtime:
-        raise ValueError(f"file mtime changed while digesting {path}: expected {expected_mtime}, got {modified}")
+        raise ValueError(f"File mtime changed while digesting {path}: expected {expected_mtime}, got {modified}")
     return st.st_size, modified
 
 
@@ -123,11 +123,11 @@ class _DigestAbort(Exception):
 
 def _check_digestible(path: Path, settings) -> None:
     if not path.exists() or not path.is_file():
-        log.error("cannot digest %s: missing_or_not_file", path)
+        log.error("Cannot digest %s: missing_or_not_file", path)
         raise _DigestAbort("missing_or_not_file")
     if is_in_blocked_subtree(path, stop_at=settings.docs):
         # respect directory-level opt-outs before any extraction, OCR, or hashing work starts
-        log.info("skipping %s: ancestor directory contains .meta marker file", path)
+        log.info("Skipping %s: ancestor directory contains .meta marker file", path)
         raise _DigestAbort("blocked_by_meta_file", metadata_target="skipped")
 
 
@@ -135,10 +135,10 @@ def _extract_or_abort(path: Path) -> ExtractedDoc:
     try:
         return dispatch_extract(path)
     except EncryptedDocumentError as exc:
-        log.error("encrypted document %s: %s", path, exc)
+        log.error("Encrypted document %s: %s", path, exc)
         raise _DigestAbort(f"encrypted: {exc}") from exc
     except ExtractorError as exc:
-        log.error("extraction failed for %s: %s", path, exc)
+        log.error("Extraction failed for %s: %s", path, exc)
         raise _DigestAbort(f"extract_failed: {exc}") from exc
 
 
@@ -167,7 +167,7 @@ def _persist_and_enqueue(
         # enqueue only after the row exists so triage can always resolve the doc id
         triage_enqueue(doc_id, reason="digested")
     except Exception as exc:  # noqa: BLE001
-        log.warning("triage enqueue failed for %s: %s", path, exc)
+        log.warning("Triage enqueue failed for %s: %s", path, exc)
     return doc_id
 
 
@@ -183,23 +183,23 @@ def digest_file(
     started = time.perf_counter()
     settings = get_settings()
     result = DigestResult(path=path)
-    log.info("digesting %s%s", path, " (dry-run)" if dry_run else "")
+    log.info("Digesting %s%s", path, " (dry-run)" if dry_run else "")
 
     try:
         _check_digestible(path, settings)
         doc = _extract_or_abort(path)
-        log.debug("extracted %s: format=%s text=%dchars", path, doc.format, len(doc.text or ""))
+        log.debug("Extracted %s: format=%s text=%dchars", path, doc.format, len(doc.text or ""))
 
         ocr_info = OcrInfo.for_tesseract_run(doc.ocr_decision) if doc.ocr_used else OcrInfo(decision=doc.ocr_decision)
         result.ocr_decision = ocr_info.decision
         if force_ocr:
             # manual force bypasses the normal OCR decision path for this single digest
             decision = OcrDecision(action="ocr_full", reason="forced")
-            log.debug("ocr decision for %s: %s (%s)", path, decision.action, decision.reason or "-")
+            log.debug("OCR decision for %s: %s (%s)", path, decision.action, decision.reason or "-")
             doc, ocr_info = _maybe_run_ocr(doc, decision)
             result.ocr_decision = ocr_info.decision
 
-        log.debug("enriching %s (%d chars)", path, len(doc.text or ""))
+        log.debug("Enriching %s (%d chars)", path, len(doc.text or ""))
         enrichment = enrich(doc, _hints_for(doc))
         result.enrichment = enrichment
         result.llm_tier = enrichment.tier
@@ -226,7 +226,7 @@ def digest_file(
 
     result.duration_ms = _elapsed_ms(started)
     log.info(
-        "digested %s | ocr=%s tier=%s category=%s target=%s id=%s | %dms",
+        "Digested %s | ocr=%s tier=%s category=%s target=%s id=%s | %dms",
         path, result.ocr_decision, result.llm_tier, result.category,
         result.metadata_target, result.doc_id, result.duration_ms,
     )

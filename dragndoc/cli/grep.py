@@ -22,7 +22,7 @@ def grep(
     from dragndoc.db import connect
 
     if field is not None and field not in _FTS_FIELDS:
-        typer.echo(f"--field must be one of: {', '.join(_FTS_FIELDS)}", err=True)
+        typer.echo(f"The --field option must be one of: {', '.join(_FTS_FIELDS)}", err=True)
         raise typer.Exit(2)
 
     if field:

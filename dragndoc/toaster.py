@@ -55,7 +55,7 @@ class Cursor:
             raw = path.read_text(encoding="utf-8").strip()
             return cls(last_id=int(raw or "0"))
         except (OSError, ValueError) as exc:
-            log.warning("cursor unreadable (%s); restarting from 0", exc)
+            log.warning("Cursor unreadable (%s); restarting from 0", exc)
             return cls()
 
     def save(self, path: Path) -> None:
@@ -192,7 +192,7 @@ def _consume(cursor: Cursor, notifier: Notifier, state: Optional[TrayState] = No
     try:
         rows = fetch_since(cursor.last_id, limit=500)
     except Exception as exc:  # noqa: BLE001
-        log.warning("toaster fetch failed: %s", exc)
+        log.warning("Toaster fetch failed: %s", exc)
         return cursor
     if not rows:
         return cursor
@@ -211,7 +211,7 @@ def _consume(cursor: Cursor, notifier: Notifier, state: Optional[TrayState] = No
                 try:
                     notifier.notify(title, body)
                 except Exception as exc:  # noqa: BLE001
-                    log.warning("notifier.notify failed: %s", exc)
+                    log.warning("Notifier.notify failed: %s", exc)
             if state is not None:
                 state.record_notification(title, body)
         cursor.last_id = max(cursor.last_id, int(event["id"]))
@@ -318,7 +318,7 @@ def _close_log_viewer() -> None:
     try:
         proc.terminate()
     except OSError as exc:
-        log.debug("log viewer terminate failed: %s", exc)
+        log.debug("Log viewer terminate failed: %s", exc)
         return
     try:
         proc.wait(timeout=2.0)
@@ -397,7 +397,7 @@ def _work_area_px() -> Optional[tuple[int, int, int, int]]:
             return None
         return (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
     except Exception as exc:  # noqa: BLE001
-        log.debug("could not query work area: %s", exc)
+        log.debug("Could not query work area: %s", exc)
         return None
 
 
@@ -422,7 +422,7 @@ def _launch_triage() -> None:
             x = wa_l + max(0, (wa_w - est_w) // 2)
             y = wa_t + max(0, (wa_h - est_h) // 2)
             cmd += ["--pos", f"{x},{y}"]
-            log.debug("triage center: work=%s window~=%dx%d → pos=%d,%d", wa, est_w, est_h, x, y)
+            log.debug("Triage center: work=%s window~=%dx%d → pos=%d,%d", wa, est_w, est_h, x, y)
         cmd += ["--size", f"{TRIAGE_WIN_COLS},{TRIAGE_WIN_ROWS}"]
         cmd += ["-d", str(REPO_ROOT), "cmd.exe", "/c", str(TRIAGE_SCRIPT)]
     elif mintty:
@@ -443,7 +443,7 @@ def _count_ready_for_triage() -> int:
 
         return q_count(inbox_only=True)
     except Exception as exc:  # noqa: BLE001
-        log.debug("triage count failed: %s", exc)
+        log.debug("Triage count failed: %s", exc)
         return 0
 
 
@@ -671,7 +671,7 @@ def start_foreground(*, tray: bool = True) -> int:
     """Run the toaster in this process; write/clear the pid file around the loop."""
     snapshot = status_snapshot()
     if snapshot["running"]:
-        print(f"toaster already running (pid={snapshot['pid']})", file=sys.stderr)
+        print(f"Toaster already running (pid={snapshot['pid']})", file=sys.stderr)
         return 1
     _write_pid(os.getpid())
     try:
@@ -685,7 +685,7 @@ def start_background(*, tray: bool = True) -> int:
     """Spawn a detached pythonw process running ``dnd toaster start --fg``."""
     snapshot = status_snapshot()
     if snapshot["running"]:
-        print(f"toaster already running (pid={snapshot['pid']})")
+        print(f"Toaster already running (pid={snapshot['pid']})")
         return 0
 
     pythonw = Path(sys.executable).with_name("pythonw.exe")
@@ -715,14 +715,14 @@ def start_background(*, tray: bool = True) -> int:
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         if proc.poll() is not None and proc.returncode != 0:
-            print(f"toaster failed to start (exit code {proc.returncode})", file=sys.stderr)
+            print(f"Toaster failed to start (exit code {proc.returncode})", file=sys.stderr)
             return 1
         snapshot = status_snapshot()
         if snapshot["running"]:
-            print(f"toaster started (pid={snapshot['pid']})")
+            print(f"Toaster started (pid={snapshot['pid']})")
             return 0
         time.sleep(0.1)
-    print("toaster start requested, but it didn't report ready before the timeout", file=sys.stderr)
+    print("Toaster start requested, but it didn't report ready before the timeout", file=sys.stderr)
     return 1
 
 
@@ -731,24 +731,24 @@ def stop_toaster(*, timeout: float = 10.0, quiet: bool = False) -> int:
     if pid is None or not pid_alive(pid):
         _clear_pid()
         if not quiet:
-            print("toaster: not running")
+            print("Toaster: not running")
         return 0
     # the child runs as a detached pythonw.exe with no console, so
     # ctrl_break can't reach it; terminate by handle instead
     try:
         terminate_pid(pid)
     except OSError as exc:
-        print(f"failed to signal toaster (pid={pid}): {exc}", file=sys.stderr)
+        print(f"Failed to signal toaster (pid={pid}): {exc}", file=sys.stderr)
         return 1
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if not pid_alive(pid):
             _clear_pid()
             if not quiet:
-                print(f"toaster stopped (pid={pid})")
+                print(f"Toaster stopped (pid={pid})")
             return 0
         time.sleep(0.1)
-    print(f"toaster did not stop within {timeout:.0f}s (pid={pid})", file=sys.stderr)
+    print(f"Toaster did not stop within {timeout:.0f}s (pid={pid})", file=sys.stderr)
     return 1
 
 

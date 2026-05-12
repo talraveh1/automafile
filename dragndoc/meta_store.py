@@ -410,14 +410,14 @@ def recompute_dups_for_hashes(hashes: Iterable[str]) -> int:
 def set_dup(path: Path, value: str) -> SetDupResult:
     """Set ``dup`` for a row and its non-inbox siblings, then restore I1."""
     if value not in DUP_VALUES:
-        raise ValueError(f"invalid dup value: {value}")
+        raise ValueError(f"Invalid dup value: {value}")
     rel = relative_to_root(path)
     siblings_changed: list[str] = []
     inbox_deferred: list[str] = []
     with transaction() as conn:
         target = _get_by_path(conn, rel)
         if target is None or target.id is None:
-            raise ValueError(f"no row for: {path}")
+            raise ValueError(f"No row for: {path}")
         _update_dup(conn, target.id, value)
         siblings = _get_by_hash_excluding(conn, target.hash, target.id)
         for sibling in siblings:
@@ -631,14 +631,14 @@ def doc_from_markdown(text: str, *, base: Doc | None = None) -> Doc:
     """
     match = _FRONTMATTER_RE.match(text)
     if not match:
-        raise ValueError("missing YAML frontmatter delimiter (---)")
+        raise ValueError("Missing YAML frontmatter delimiter (---)")
     front_raw, body = match.group(1), match.group(2)
     try:
         front = yaml.safe_load(front_raw) or {}
     except yaml.YAMLError as exc:
-        raise ValueError(f"frontmatter YAML parse error: {exc}") from exc
+        raise ValueError(f"Frontmatter YAML parse error: {exc}") from exc
     if not isinstance(front, dict):
-        raise ValueError("frontmatter must be a YAML mapping")
+        raise ValueError("Frontmatter must be a YAML mapping")
 
     summary, notes = _split_body(body)
     seed = base or Doc()

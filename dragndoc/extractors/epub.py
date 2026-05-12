@@ -24,12 +24,12 @@ def extract(path: Path) -> ExtractedDoc:
         from ebooklib import epub, ITEM_DOCUMENT
         from bs4 import BeautifulSoup
     except ImportError as exc:
-        raise CorruptDocumentError("ebooklib / beautifulsoup4 not installed") from exc
+        raise CorruptDocumentError("Ebooklib / beautifulsoup4 not installed") from exc
 
     try:
         book = epub.read_epub(str(path))
     except Exception as exc:  # noqa: BLE001
-        raise CorruptDocumentError(f"epub failed: {exc}") from exc
+        raise CorruptDocumentError(f"Epub failed: {exc}") from exc
 
     cfg = CapConfig.from_settings(get_settings())
     items = list(book.get_items_of_type(ITEM_DOCUMENT))

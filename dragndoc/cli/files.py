@@ -17,27 +17,27 @@ log = get_logger(__name__)
 def _resolve_move_target(src: Path, dst: Path, *, force: bool, allow_directory: bool) -> Path:
     """Validate ``src`` and resolve the destination for ``mv``/``cp``."""
     if not src.exists():
-        typer.echo(f"src not found: {src}", err=True)
+        typer.echo(f"Source not found: {src}", err=True)
         raise typer.Exit(1)
     if src.is_dir() and not allow_directory:
-        typer.echo(f"src is not a file: {src}", err=True)
+        typer.echo(f"Source is not a file: {src}", err=True)
         raise typer.Exit(1)
     if not (src.is_file() or src.is_dir()):
-        typer.echo(f"src is not a file: {src}", err=True)
+        typer.echo(f"Source is not a file: {src}", err=True)
         raise typer.Exit(1)
 
     target = dst / src.name if dst.exists() and dst.is_dir() else dst
     if target.resolve() == src.resolve():
-        typer.echo(f"src and dst are the same: {src}", err=True)
+        typer.echo(f"Source and destination are the same: {src}", err=True)
         raise typer.Exit(1)
     if src.is_dir() and target.exists():
-        typer.echo(f"target exists: {target}", err=True)
+        typer.echo(f"Target exists: {target}", err=True)
         raise typer.Exit(1)
     if src.is_dir() and target.resolve().is_relative_to(src.resolve()):
-        typer.echo(f"target is inside source directory: {target}", err=True)
+        typer.echo(f"Target is inside source directory: {target}", err=True)
         raise typer.Exit(1)
     if target.exists() and not force:
-        typer.echo(f"target exists: {target} (use -f to overwrite)", err=True)
+        typer.echo(f"Target exists: {target} (use -f to overwrite)", err=True)
         raise typer.Exit(1)
 
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -85,7 +85,7 @@ def _confirm_multi_change(
 ) -> None:
     if docs_count + dirs_count <= 1 and fs_count <= 1:
         return
-    typer.echo(f"{action} affects {docs_count} docs, {dirs_count} dirs, and {fs_count} filesystem entries.")
+    typer.echo(f"{action.capitalize()} affects {docs_count} docs, {dirs_count} dirs, and {fs_count} filesystem entries.")
     if yes:
         return
     if not typer.confirm("Continue?", default=False):
@@ -121,7 +121,7 @@ def mv(
             rewrite_prefix(conn, "docs", src_rel, new_rel)
         else:
             conn.execute("UPDATE docs SET path = ? WHERE path = ?", (new_rel, src_rel))
-    typer.echo(f"moved: {target}")
+    typer.echo(f"Moved: {target}")
 
 
 @app.command()
@@ -142,7 +142,7 @@ def cp(
         src_doc.id = None  # force INSERT path on upsert
         src_doc.path = relative_to_root(target)
         upsert(src_doc)
-    typer.echo(f"copied: {target}")
+    typer.echo(f"Copied: {target}")
 
 
 @app.command()
@@ -168,10 +168,10 @@ def rm(
     if not exists and not (metadata_only and (prefix_dirs or prefix_docs)):
         if force:
             return
-        typer.echo(f"not found: {path}", err=True)
+        typer.echo(f"Not found: {path}", err=True)
         raise typer.Exit(1)
     if exists and not (path.is_file() or path.is_dir()):
-        typer.echo(f"not a file or directory: {path}", err=True)
+        typer.echo(f"Not a file or directory: {path}", err=True)
         raise typer.Exit(1)
 
     directory_scope = path.is_dir() if exists else prefix_dirs > 0
@@ -201,7 +201,7 @@ def rm(
     hashes = {row["hash"] for row in hash_rows if row["hash"]}
     if hashes:
         recompute_dups_for_hashes(hashes)
-    typer.echo(f"removed: {path}")
+    typer.echo(f"Removed: {path}")
 
 
 @app.command()
@@ -215,10 +215,10 @@ def ls(
     from dragndoc.meta_store import relative_to_root
 
     if not path.exists():
-        typer.echo(f"not found: {path}", err=True)
+        typer.echo(f"Not found: {path}", err=True)
         raise typer.Exit(1)
     if not path.is_dir():
-        typer.echo(f"not a directory: {path}", err=True)
+        typer.echo(f"Not a directory: {path}", err=True)
         raise typer.Exit(1)
 
     entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))

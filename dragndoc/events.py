@@ -29,7 +29,7 @@ def append(kind: str, **fields: Any) -> None:
                 (utc_now_iso_micro(), kind, payload),
             )
     except Exception as exc:  # noqa: BLE001
-        log.warning("events.append failed (%s): %s", kind, exc)
+        log.warning("Event append failed (%s): %s", kind, exc)
 
 
 # event kinds; toaster reads these to drive both status and notifications

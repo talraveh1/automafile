@@ -55,7 +55,7 @@ def write_pycache_pth(venv: Path, repo: Path) -> None:
     prefix = (repo / "build" / "pycache").resolve().as_posix()
     line = f"import sys; sys.pycache_prefix = {prefix!r}\n"
     target.write_text(line, encoding="utf-8")
-    print(f">> wrote {target}")
+    print(f">> Wrote {target}")
 
 
 def run(cmd: Sequence[str | Path], **kwargs) -> None:

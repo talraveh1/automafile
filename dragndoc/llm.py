@@ -155,14 +155,14 @@ def _ollama_generate(prompt: str, *, extra_options: dict | None = None) -> str:
         "format": "json",
         "options": options,
     }
-    log.debug("ollama POST %s model=%s prompt=%dchars", url, settings.ollama.model, len(prompt))
+    log.debug("Ollama POST %s model=%s prompt=%dchars", url, settings.ollama.model, len(prompt))
     started = _time.perf_counter()
     # let HTTP and JSON failures bubble so the caller can return a placeholder result
     resp = requests.post(url, json=body, timeout=300)
     resp.raise_for_status()
     data = resp.json()
     raw = data.get("response", "")
-    log.debug("ollama response: %d chars in %dms", len(raw), int((_time.perf_counter() - started) * 1000))
+    log.debug("Ollama response: %d chars in %dms", len(raw), int((_time.perf_counter() - started) * 1000))
     return raw
 
 
@@ -296,44 +296,44 @@ def parse_with_tiers(raw: str, prompt_for_retry: str | None = None) -> Enrichmen
     # try lossless JSON first, then progressively more tolerant recovery paths
     parsed = _strict_parse(raw)
     if parsed is not None:
-        log.debug("llm parse tier=strict")
+        log.debug("LLM parse tier=strict")
         return _coerce_to_result(parsed, "strict", raw)
 
     parsed = _repair_parse(raw)
     if parsed is not None:
-        log.debug("llm parse tier=repair")
+        log.debug("LLM parse tier=repair")
         return _coerce_to_result(parsed, "repair", raw)
 
     if prompt_for_retry:
-        log.info("llm strict+repair failed; retrying with reminder")
+        log.info("LLM strict+repair failed; retrying with reminder")
         retry_prompt = prompt_for_retry + "\n\nReminder: do NOT use double-quote characters inside string values."
         try:
             retry_raw = _ollama_generate(retry_prompt)
             parsed = _strict_parse(retry_raw) or _repair_parse(retry_raw)
             if parsed is not None:
-                log.debug("llm parse tier=retry")
+                log.debug("LLM parse tier=retry")
                 return _coerce_to_result(parsed, "retry", retry_raw)
             # retry output can still be useful even when it is not valid JSON
             partial = _regex_recover(retry_raw)
             if partial:
-                log.debug("llm parse tier=regex (after retry)")
+                log.debug("LLM parse tier=regex (after retry)")
                 return _coerce_to_result(partial, "regex", retry_raw)
         except Exception as exc:  # noqa: BLE001
             log.warning("LLM retry failed: %s", exc)
 
     partial = _regex_recover(raw)
     if partial:
-        log.warning("llm parse tier=regex (degraded recovery, raw=%d chars)", len(raw))
+        log.warning("LLM parse tier=regex (degraded recovery, raw=%d chars)", len(raw))
         return _coerce_to_result(partial, "regex", raw)
 
-    log.error("llm parse failed entirely; returning placeholder (raw=%d chars)", len(raw))
+    log.error("LLM parse failed entirely; returning placeholder (raw=%d chars)", len(raw))
     return _placeholder_result(raw)
 
 
 def enrich(doc: ExtractedDoc, hints: dict | None = None) -> EnrichmentResult:
     """Send text to Ollama, parse with tiered fallback, return enrichment."""
     prompt = _build_prompt(doc, hints or {}, _load_taxonomy())
-    log.info("enrich: text=%dchars hints=%s", len(doc.text or ""), sorted((hints or {}).keys()) or "[]")
+    log.info("Enrich: text=%dchars hints=%s", len(doc.text or ""), sorted((hints or {}).keys()) or "[]")
     try:
         raw = _ollama_generate(prompt)
     except Exception as exc:  # noqa: BLE001
@@ -341,7 +341,7 @@ def enrich(doc: ExtractedDoc, hints: dict | None = None) -> EnrichmentResult:
         return _placeholder_result(f"<<error>> {exc}")
     result = parse_with_tiers(raw, prompt_for_retry=prompt)
     log.info(
-        "enrich done: tier=%s category=%s confidence=%s tags=%d review=%s",
+        "Enrich done: tier=%s category=%s confidence=%s tags=%d review=%s",
         result.tier, result.category, result.confidence, len(result.tags), result.review,
     )
     return result

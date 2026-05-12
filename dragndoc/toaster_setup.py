@@ -56,7 +56,7 @@ def _ps_quote(s: str) -> str:
 def _install_shortcut() -> int:
     pythonw = _venv_pythonw(VENV)
     if not pythonw.exists():
-        print(f"venv pythonw.exe not found at {pythonw}\nRun scripts\\install.py first.", file=sys.stderr)
+        print(f"Venv pythonw.exe not found at {pythonw}\nRun scripts\\install.py first.", file=sys.stderr)
         return 1
 
     target = _shortcut_path()

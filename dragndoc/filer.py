@@ -95,24 +95,24 @@ def apply_filing(path: Path, proposal: FilingProposal, *, overwrite: bool = Fals
 
     target = target_path_for(proposal)
     target.parent.mkdir(parents=True, exist_ok=True)
-    log.info("filing %s -> %s", path, target)
+    log.info("Filing %s -> %s", path, target)
 
     if target.exists() and target.resolve() != path.resolve():
         existing_hash = hash_file(target)
         new_hash = hash_file(path)
         if existing_hash == new_hash:
-            log.info("idempotent re-file: target hash matches; removing source %s", path)
+            log.info("Idempotent re-file: target hash matches; removing source %s", path)
             path.unlink()
             _post_move_metadata(path, target, proposal)
             return target
         if not overwrite:
-            log.warning("collision: %s exists with different content (overwrite=False)", target)
+            log.warning("Collision: %s exists with different content (overwrite=False)", target)
             raise TargetCollision(f"{target} already exists with different content")
-        log.warning("overwriting %s with %s", target, path)
+        log.warning("Overwriting %s with %s", target, path)
 
     shutil.move(str(path), str(target))
     _post_move_metadata(path, target, proposal)
-    log.info("filed: %s", target)
+    log.info("Filed: %s", target)
     return target
 
 

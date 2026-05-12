@@ -26,7 +26,7 @@ def _require_doc(path: Path):
 
     doc = get_by_file(path)
     if doc is None:
-        typer.echo(f"no row for: {path}", err=True)
+        typer.echo(f"No row for: {path}", err=True)
         raise typer.Exit(1)
     return doc
 
@@ -76,13 +76,13 @@ def meta_set(
 
     for assignment in assignments:
         if "=" not in assignment:
-            typer.echo(f"bad assignment (expected field=value): {assignment}", err=True)
+            typer.echo(f"Bad assignment (expected field=value): {assignment}", err=True)
             raise typer.Exit(2)
         key, _, value = assignment.partition("=")
         key = key.strip()
         value = value.strip()
         if key not in _META_FRONTMATTER_FIELDS:
-            typer.echo(f"unknown or read-only field: {key}", err=True)
+            typer.echo(f"Unknown or read-only field: {key}", err=True)
             raise typer.Exit(2)
         if key == "dup":
             dup_value = value
@@ -102,7 +102,7 @@ def meta_set(
         except ValueError as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(2) from None
-    typer.echo(f"updated: {doc.path}")
+    typer.echo(f"Updated: {doc.path}")
 
 
 @meta_app.command("apply")
@@ -115,18 +115,18 @@ def meta_apply(
 
     base = _require_doc(path)
     if not source.exists():
-        typer.echo(f"source file not found: {source}", err=True)
+        typer.echo(f"Source file not found: {source}", err=True)
         raise typer.Exit(1)
 
     text = source.read_text(encoding="utf-8")
     try:
         new_doc = doc_from_markdown(text, base=base)
     except ValueError as exc:
-        typer.echo(f"could not parse: {exc}", err=True)
+        typer.echo(f"Could not parse: {exc}", err=True)
         raise typer.Exit(2) from None
     _freeze_identity(new_doc, base)
     upsert(new_doc)
-    typer.echo(f"applied: {new_doc.path}")
+    typer.echo(f"Applied: {new_doc.path}")
 
 
 @meta_app.command("edit")
@@ -149,11 +149,11 @@ def meta_edit(
         try:
             new_doc = doc_from_markdown(edited, base=doc)
         except ValueError as exc:
-            typer.echo(f"could not parse edited file (left at {tmp_name}): {exc}", err=True)
+            typer.echo(f"Could not parse edited file (left at {tmp_name}): {exc}", err=True)
             raise typer.Exit(2) from None
         _freeze_identity(new_doc, doc)
         upsert(new_doc)
-        typer.echo(f"applied: {new_doc.path}")
+        typer.echo(f"Applied: {new_doc.path}")
     finally:
         try:
             Path(tmp_name).unlink()

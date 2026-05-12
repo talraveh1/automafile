@@ -46,11 +46,11 @@ def review_ocr(
                     upsert(doc)
                 typer.echo("  re-OCR'd.")
             except Exception as exc:  # noqa: BLE001
-                typer.echo(f"  failed: {exc}")
+                typer.echo(f"  Failed: {exc}")
         elif choice.lower().startswith("s"):
-            typer.echo("  skipped (will reappear on next scan)")
+            typer.echo("  Skipped (will reappear on next scan)")
         else:
-            typer.echo("  declined.")
+            typer.echo("  Declined.")
 
 
 @review_app.command("orphans")
@@ -66,10 +66,10 @@ def review_orphans(
     if not recon.renames and not recon.merges and not recon.unresolved_orphans:
         typer.echo("No orphan rows.")
         return
-    action = "applied" if apply else "proposed"
+    action = "Applied" if apply else "Proposed"
     for old, new in recon.renames:
         typer.echo(f"{action} rename: {old} -> {new}")
     for merge in recon.merges:
         typer.echo(f"{action} merge: {merge.old_path} -> {merge.new_path} winner={merge.winner_id} loser={merge.loser_id}")
     for orphan in recon.unresolved_orphans:
-        typer.echo(f"unresolved: {orphan.recorded_path} id={orphan.doc_id} reason={orphan.reason}")
+        typer.echo(f"Unresolved: {orphan.recorded_path} id={orphan.doc_id} reason={orphan.reason}")

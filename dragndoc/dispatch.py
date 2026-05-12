@@ -120,14 +120,14 @@ def get_extractor(path: Path):
     ext_mime = _mime_from_extension(path)
     if ext_mime != UNKNOWN_MIME:
         mod = _extractor_for_mime(ext_mime) or unknown_ext
-        log.debug("extractor for %s: %s (by extension MIME %s)", path.name, mod.__name__, ext_mime)
+        log.debug("Extractor for %s: %s (by extension MIME %s)", path.name, mod.__name__, ext_mime)
         return mod
     mime = _sniff_mime(path)
     mod = _extractor_for_mime(mime or UNKNOWN_MIME)
     if mod is not None and mime:
-        log.debug("extractor for %s: %s (by mime %s)", path.name, mod.__name__, mime)
+        log.debug("Extractor for %s: %s (by mime %s)", path.name, mod.__name__, mime)
         return mod
-    log.debug("extractor for %s: unknown (ext=%s mime=%s)", path.name, path.suffix.lower(), mime)
+    log.debug("Extractor for %s: unknown (ext=%s mime=%s)", path.name, path.suffix.lower(), mime)
     return unknown_ext
 
 
@@ -137,25 +137,25 @@ def extract(path: Path) -> ExtractedDoc:
         try:
             # known extensions get a strict first pass so mislabeled files fail fast
             doc = _extract_with_mime(path, mime, strict=True)
-            log.debug("extracted %s by extension MIME %s", path.name, mime)
+            log.debug("Extracted %s by extension MIME %s", path.name, mime)
             return doc
         except ExtractorError as exc:
-            log.debug("extension MIME extraction failed for %s as %s: %s", path.name, mime, exc)
+            log.debug("Extension MIME extraction failed for %s as %s: %s", path.name, mime, exc)
 
     # fall back to sniffing only after the extension-based path declines the file
     sniffed_mime = _sniff_mime(path)
     if sniffed_mime:
         mime = sniffed_mime
-        log.debug("sniffed %s as %s", path.name, mime)
+        log.debug("Sniffed %s as %s", path.name, mime)
 
     if mime != UNKNOWN_MIME:
         try:
             doc = _extract_with_mime(path, mime, strict=False)
-            log.debug("extracted %s by sniffed/fallback MIME %s", path.name, mime)
+            log.debug("Extracted %s by sniffed/fallback MIME %s", path.name, mime)
             return doc
         except ExtractorError as exc:
-            log.debug("fallback MIME extraction failed for %s as %s: %s", path.name, mime, exc)
+            log.debug("Fallback MIME extraction failed for %s as %s: %s", path.name, mime, exc)
 
     # the unknown extractor is the final safety net for unsupported or ambiguous files
-    log.debug("extracting %s as unknown", path.name)
+    log.debug("Extracting %s as unknown", path.name)
     return _extract_with_mime(path, UNKNOWN_MIME, strict=False)

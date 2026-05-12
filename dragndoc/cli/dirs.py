@@ -21,7 +21,7 @@ def dir_get(
     if row is None and path.exists() and path.is_dir():
         row = ensure_tracked(path)
     if row is None:
-        typer.echo(f"no directory row for: {path}", err=True)
+        typer.echo(f"No directory row for: {path}", err=True)
         raise typer.Exit(1)
     typer.echo(json.dumps(row.to_dict(), indent=2, ensure_ascii=False, default=str))
 
@@ -38,7 +38,7 @@ def dir_set(
         valid = ", ".join(sorted(DIR_MODES - {"unknown"}))
         typer.echo(f"{exc}; expected one of: {valid}", err=True)
         raise typer.Exit(2) from None
-    typer.echo(f"updated: {row.path} ({row.mode})")
+    typer.echo(f"Updated: {row.path} ({row.mode})")
 
 
 @dir_app.command("ls")

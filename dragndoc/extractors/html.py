@@ -16,7 +16,7 @@ def extract(path: Path, *, strict: bool = False) -> ExtractedDoc:
     try:
         from bs4 import BeautifulSoup
     except ImportError as exc:
-        raise CorruptDocumentError("beautifulsoup4 is not installed") from exc
+        raise CorruptDocumentError("Beautifulsoup4 is not installed") from exc
 
     try:
         raw = path.read_bytes()

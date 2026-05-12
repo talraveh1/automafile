@@ -232,7 +232,7 @@ def bootstrap_schema(path: Path | None = None) -> None:
                     )
                     conn.commit()
                     _bootstrapped.add(target)
-                    log.debug("schema bootstrapped at %s", target)
+                    log.debug("Schema bootstrapped at %s", target)
                     return
                 raise RuntimeError("Existing database is missing schema_meta.ver; migrate it explicitly")
             conn.execute(
@@ -258,7 +258,7 @@ def bootstrap_schema(path: Path | None = None) -> None:
         finally:
             conn.close()
         _bootstrapped.add(target)
-        log.debug("schema bootstrapped at %s", target)
+        log.debug("Schema bootstrapped at %s", target)
 
 
 def reset_bootstrap_cache() -> None:

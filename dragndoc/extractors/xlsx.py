@@ -23,11 +23,11 @@ def extract(path: Path) -> ExtractedDoc:
     try:
         from openpyxl import load_workbook
     except ImportError as exc:
-        raise CorruptDocumentError("openpyxl is not installed") from exc
+        raise CorruptDocumentError("Openpyxl is not installed") from exc
     try:
         wb = load_workbook(str(path), data_only=True, read_only=True)
     except Exception as exc:  # noqa: BLE001
-        raise CorruptDocumentError(f"openpyxl failed for {path}: {exc}") from exc
+        raise CorruptDocumentError(f"Openpyxl failed for {path}: {exc}") from exc
 
     cfg = CapConfig.from_settings(get_settings())
 

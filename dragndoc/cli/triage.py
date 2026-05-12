@@ -96,9 +96,9 @@ def triage_done_cmd(
     rel = relative_to_root(path)
     removed = dequeue_by_path(rel)
     if removed:
-        typer.echo(f"removed: {rel}")
+        typer.echo(f"Removed: {rel}")
     else:
-        typer.echo(f"not in queue: {rel}", err=True)
+        typer.echo(f"Not in queue: {rel}", err=True)
         raise typer.Exit(1)
 
 
@@ -110,7 +110,7 @@ def triage_rebuild_cmd(
     from dragndoc.triage import rebuild_from_existing_docs
 
     n = rebuild_from_existing_docs(inbox_only=not all_)
-    typer.echo(f"enqueued: {n}")
+    typer.echo(f"Enqueued: {n}")
 
 
 @triage_app.command("clear")
@@ -129,7 +129,7 @@ def triage_clear_cmd(
         scope = "all queued" if all_ else "queued inbox"
         confirm = typer.prompt(f"Remove {n} {scope} entries? [y/N]", default="N")
         if not confirm.lower().startswith("y"):
-            typer.echo("aborted")
+            typer.echo("Aborted")
             raise typer.Exit(1)
     removed = clear(inbox_only=not all_)
-    typer.echo(f"removed: {removed}")
+    typer.echo(f"Removed: {removed}")

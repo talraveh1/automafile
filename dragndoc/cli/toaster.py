@@ -67,7 +67,7 @@ def toaster_status() -> None:
 def toaster_install() -> None:
     """Install the Windows Startup shortcut + register the AUMID."""
     if sys.platform != "win32":
-        typer.echo("install is Windows-only", err=True)
+        typer.echo("Install is Windows-only", err=True)
         raise typer.Exit(2)
     log.info("CLI: toaster install")
     from dragndoc.toaster_setup import install
@@ -78,7 +78,7 @@ def toaster_install() -> None:
 def toaster_uninstall() -> None:
     """Remove the Windows Startup shortcut + unregister the AUMID."""
     if sys.platform != "win32":
-        typer.echo("uninstall is Windows-only", err=True)
+        typer.echo("Uninstall is Windows-only", err=True)
         raise typer.Exit(2)
     log.info("CLI: toaster uninstall")
     from dragndoc.toaster_setup import uninstall

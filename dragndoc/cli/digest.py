@@ -75,10 +75,10 @@ def _digest_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_
     report = run_scan(force=force)
     candidates = list(report.worklist.iter_digest_candidates())
     if not candidates:
-        typer.echo("nothing to digest")
+        typer.echo("Nothing to digest")
         return
 
-    typer.echo(f"digesting {len(candidates)} file(s)")
+    typer.echo(f"Digesting {len(candidates)} file(s)")
 
     append_event(DIGEST_STARTED, scope="tree", count=len(candidates))
 
@@ -121,7 +121,7 @@ def _digest_tree(settings, *, dry_run: bool, force_ocr: bool, force: bool, stop_
             ready_count=triage_count(),
         )
 
-    typer.echo(f"done: {len(candidates) - failures}/{len(candidates)} succeeded")
+    typer.echo(f"Done: {len(candidates) - failures}/{len(candidates)} succeeded")
     if failures:
         raise typer.Exit(1)
 
@@ -157,13 +157,13 @@ def scan(
         typer.echo(json.dumps(wl.to_dict(), indent=2, ensure_ascii=False))
         return
     typer.echo(
-        f"scan complete: seen={wl.files_seen} need_ocr={len(wl.files_needing_ocr)} "
+        f"Scan complete: seen={wl.files_seen} need_ocr={len(wl.files_needing_ocr)} "
         f"need_meta={len(wl.files_needing_metadata)} partial={len(wl.files_with_partial_metadata)} "
         f"stale={len(wl.files_with_stale_metadata)} ocr_review={len(wl.ocr_review_candidates)} "
         f"missing={len(wl.missing_files)} unprocessable={len(wl.unprocessable_files)}"
     )
     if wl.files_needing_metadata or wl.files_needing_ocr or wl.files_with_partial_metadata or wl.files_with_stale_metadata:
-        typer.echo("next: dnd digest")
+        typer.echo("Next: dnd digest")
 
 
 @app.command()

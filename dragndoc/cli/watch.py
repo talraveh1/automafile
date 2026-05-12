@@ -29,9 +29,9 @@ def _request_watch_stop(*, wait: bool, timeout: float) -> None:
 
     request_stop()
     if wait and not wait_for_running(False, timeout=timeout):
-        typer.echo("watcher stop request sent, but it did not stop before the timeout", err=True)
+        typer.echo("Watcher stop request sent, but it did not stop before the timeout", err=True)
         raise typer.Exit(1)
-    typer.echo("watcher stop requested")
+    typer.echo("Watcher stop requested")
 
 
 def _request_watch_start(*, fg: bool, docs: Path | None, wait: bool, timeout: float) -> None:
@@ -40,32 +40,32 @@ def _request_watch_start(*, fg: bool, docs: Path | None, wait: bool, timeout: fl
     if fg:
         snapshot = status_snapshot()
         if bool(snapshot["running"]):
-            typer.echo("supervised watcher is already running; stop it first or use the existing background watcher", err=True)
+            typer.echo("Supervised watcher is already running; stop it first or use the existing background watcher", err=True)
             raise typer.Exit(1)
         log.info("CLI: watch start --fg (docs=%s)", docs)
         _run_watch_foreground(docs)
         return
 
     if docs is not None:
-        typer.echo("--docs is only supported with --fg", err=True)
+        typer.echo("The --docs option is only supported with --fg", err=True)
         raise typer.Exit(2)
 
     snapshot = status_snapshot()
     if bool(snapshot["running"]):
         pid = snapshot["pid"]
-        typer.echo(f"watcher already running (pid={pid})")
+        typer.echo(f"Watcher already running (pid={pid})")
         return
 
     log.info("CLI: watch start (wait=%s timeout=%s)", wait, timeout)
     request_start()
     if wait and not wait_for_running(True, timeout=timeout):
         typer.echo(
-            "background watcher start was requested, but no supervisor started it before the timeout; "
+            "Background watcher start was requested, but no supervisor started it before the timeout; "
             "use `dnd watch supervise` or `dnd watch start --fg`",
             err=True,
         )
         raise typer.Exit(1)
-    typer.echo("watcher start requested")
+    typer.echo("Watcher start requested")
 
 
 def _show_watch_status() -> None:

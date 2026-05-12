@@ -22,7 +22,8 @@ def _print_status(label: str, snapshot: dict) -> None:
     """Print a one-line process status using the project's standard format."""
     state = snapshot["state"]
     pid = snapshot["pid"]
+    title = label[:1].upper() + label[1:]
     if pid is None:
-        typer.echo(f"{label}: {state}")
+        typer.echo(f"{title}: {state}")
     else:
-        typer.echo(f"{label}: {state} (pid={pid})")
+        typer.echo(f"{title}: {state} (pid={pid})")

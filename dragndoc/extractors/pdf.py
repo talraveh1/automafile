@@ -77,7 +77,7 @@ def _read_pdf_metadata(path: Path) -> tuple[dict[str, Any], bool]:
     except pikepdf.PasswordError:
         return {}, True
     except Exception as exc:  # noqa: BLE001
-        raise CorruptDocumentError(f"pikepdf could not open {path}: {exc}") from exc
+        raise CorruptDocumentError(f"Pikepdf could not open {path}: {exc}") from exc
 
 
 def extract(path: Path) -> ExtractedDoc:
@@ -94,7 +94,7 @@ def extract(path: Path) -> ExtractedDoc:
     except EncryptedDocumentError:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise CorruptDocumentError(f"pypdf failed for {path}: {exc}") from exc
+        raise CorruptDocumentError(f"Pypdf failed for {path}: {exc}") from exc
 
     settings = get_settings()
     cfg = CapConfig.from_settings(settings)
