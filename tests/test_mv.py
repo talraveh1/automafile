@@ -63,7 +63,7 @@ def test_mv_fails_when_target_exists(docs_root):
 
     result = runner.invoke(app, ["mv", str(src), str(dst)])
     assert result.exit_code != 0
-    assert "target exists" in result.output
+    assert "Target exists" in result.output
     assert src.exists()
     assert dst.read_text(encoding="utf-8") == "squatter"
 
@@ -97,4 +97,4 @@ def test_mv_missing_src_errors(docs_root):
     dst = docs_root / "anywhere.txt"
     result = runner.invoke(app, ["mv", str(src), str(dst)])
     assert result.exit_code != 0
-    assert "src not found" in result.output
+    assert "Source not found" in result.output

@@ -56,7 +56,7 @@ def test_ls_missing_path_errors(docs_root):
     target = docs_root / "ghost"
     result = runner.invoke(app, ["ls", str(target)])
     assert result.exit_code != 0
-    assert "not found" in result.output
+    assert "Not found" in result.output
 
 
 def test_ls_on_file_errors(docs_root):
@@ -64,7 +64,7 @@ def test_ls_on_file_errors(docs_root):
     target.write_text("hi", encoding="utf-8")
     result = runner.invoke(app, ["ls", str(target)])
     assert result.exit_code != 0
-    assert "not a directory" in result.output
+    assert "Not a directory" in result.output
 
 
 def test_meta_cat_renders_markdown(docs_root):
@@ -83,7 +83,7 @@ def test_meta_cat_no_row_errors(docs_root):
     target.write_text("no row", encoding="utf-8")
     result = runner.invoke(app, ["meta", "cat", str(target)])
     assert result.exit_code != 0
-    assert "no row" in result.output
+    assert "No row" in result.output
 
 
 def test_meta_get_returns_json(docs_root):

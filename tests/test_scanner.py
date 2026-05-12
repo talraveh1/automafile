@@ -82,8 +82,8 @@ def test_run_scan_logs_directories_at_info(docs_root, caplog):
         run_scan()
 
     messages = [record.getMessage() for record in caplog.records if record.name == "dragndoc.scanner"]
-    assert any("scan: entering" in message and str(alpha.parent) in message for message in messages)
-    assert any("scan: entering" in message and str(beta.parent) in message for message in messages)
+    assert any("Scan: entering" in message and str(alpha.parent) in message for message in messages)
+    assert any("Scan: entering" in message and str(beta.parent) in message for message in messages)
 
 
 def test_partial_metadata_detected(docs_root):

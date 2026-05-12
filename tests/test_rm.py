@@ -51,7 +51,7 @@ def test_rm_missing_errors(docs_root):
     target = docs_root / "Inbox" / "ghost.txt"
     result = runner.invoke(app, ["rm", str(target)])
     assert result.exit_code != 0
-    assert "not found" in result.output
+    assert "Not found" in result.output
 
 
 def test_rm_force_ignores_missing(docs_root):

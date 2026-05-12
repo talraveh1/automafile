@@ -67,7 +67,7 @@ def test_cp_fails_when_target_exists(docs_root):
 
     result = runner.invoke(app, ["cp", str(src), str(dst)])
     assert result.exit_code != 0
-    assert "target exists" in result.output
+    assert "Target exists" in result.output
     assert dst.read_text(encoding="utf-8") == "squatter"
 
 
@@ -101,7 +101,7 @@ def test_cp_missing_src_errors(docs_root):
     dst = docs_root / "anywhere.txt"
     result = runner.invoke(app, ["cp", str(src), str(dst)])
     assert result.exit_code != 0
-    assert "src not found" in result.output
+    assert "Source not found" in result.output
 
 
 def test_cp_same_src_and_dst_errors(docs_root):
