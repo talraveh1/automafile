@@ -2,54 +2,54 @@
 
 ```mermaid
 flowchart LR
-   inbox(["📥 Inbox dir"]):::source
-   watcher["<b>Watcher</b><br/><i>watchdog<br/>PollingObserver</i>"]:::watch
-   pipeline(["<b>Pipeline</b>"]):::core
+  inbox(["📥 Inbox dir"]):::source
+  watcher["<b>Watcher</b><br/><i>watchdog<br/>PollingObserver</i>"]:::watch
+  pipeline(["<b>Pipeline</b>"]):::core
 
-   subgraph extract ["<b>Extraction</b>"]
-      direction TB
-      dispatch["<b>Dispatch</b><br/><i>ext / MIME</i>"]:::stage
-      extractors["<b>Extractors</b><br/>pdf · docx<br/>xlsx · pptx<br/>image · html<br/>epub · text<br/>audio · video"]:::stage
-      ocr["<b>OCR</b><br/><i>run_ocr<br/>tesseract</i>"]:::stage
-      ocr_decision["<b>PDF OCR<br/>Decision</b><br/><i>per-page chars</i>"]:::stage
-      asr["<b>ASR</b><br/><i>transcribe<br/>faster-whisper</i>"]:::stage
-      subs["<b>Subtitle<br/>Extract</b><br/><i>ffmpeg / ffprobe</i>"]:::stage
-   end
+  subgraph extract ["<b>Extraction</b>"]
+    direction TB
+    dispatch["<b>Dispatch</b><br/><i>ext / MIME</i>"]:::stage
+    extractors["<b>Extractors</b><br/>pdf · docx<br/>xlsx · pptx<br/>image · html<br/>epub · text<br/>audio · video"]:::stage
+    ocr["<b>OCR</b><br/><i>run_ocr<br/>tesseract</i>"]:::stage
+    ocr_decision["<b>PDF OCR<br/>Decision</b><br/><i>per-page chars</i>"]:::stage
+    asr["<b>ASR</b><br/><i>transcribe<br/>faster-whisper</i>"]:::stage
+    subs["<b>Subtitle<br/>Extract</b><br/><i>ffmpeg / ffprobe</i>"]:::stage
+  end
 
-   subgraph output ["<b>Output</b>"]
-      direction TB
-      llm["<b>LLM</b> · Ollama<br/><i>tiered JSON parse</i>"]:::ai
-      writers["<b>Meta Store</b><br/><i>upsert docs+ocr<br/>FTS5 mirror</i>"]:::write
-   end
+  subgraph output ["<b>Output</b>"]
+    direction TB
+    llm["<b>LLM</b> · Ollama<br/><i>tiered JSON parse</i>"]:::ai
+    writers["<b>Meta Store</b><br/><i>upsert docs+ocr<br/>FTS5 mirror</i>"]:::write
+    llm --> writers
+  end
 
-   db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · asr · events<br/>triage_queue · docs_fts</i>")]:::journal
-   toaster["<b>Toaster</b><br/><i>host process<br/>polls events.id</i>"]:::notify
+  db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · asr · events<br/>triage_queue · docs_fts</i>")]:::journal
+  toaster["<b>Toaster</b><br/><i>host process<br/>polls events.id</i>"]:::notify
 
-   cli["<b>CLI</b><br/><i>digest · scan · review<br/>meta get/cat/set/edit<br/>grep · mv · cp · rm · ls<br/>triage list/next/done</i>"]:::tool
-   triage[/"🗂️ Triage skill"/]:::tool
+  cli["<b>CLI</b><br/><i>digest · scan · review<br/>meta get/cat/set/edit<br/>grep · mv · cp · rm · ls<br/>triage list/next/done</i>"]:::tool
+  triage(["🗂️ Triage skill"]):::source
 
-   inbox --> watcher --> pipeline
-   pipeline --> dispatch --> extractors --> output
-   pipeline --> ocr --> ocr_decision --> output
-   pipeline --> asr --> output
-   pipeline --> subs --> output
-   llm --> writers
-   writers -->|upsert| db
-   writers -.->|enqueue| db
-   db -->|poll by id| toaster
-   triage <-.-> cli
-   style extract fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#0f172a
-   style output fill:#f5f3ff,stroke:#a78bfa,stroke-width:2px,color:#312e81
+  inbox --> watcher --> pipeline
+  pipeline --> dispatch --> extractors --> output
+  pipeline --> ocr --> ocr_decision --> output
+  pipeline --> asr --> output
+  pipeline --> subs --> output
+  output -->|upsert| db
+  output -.->|enqueue| db
+  db -->|poll by id| toaster
+  triage <-.-> cli
+  style extract fill:#f8fafc,stroke:#94a3b8,stroke-width:2px,color:#0f172a
+  style output fill:#f5f3ff,stroke:#a78bfa,stroke-width:2px,color:#312e81
 
-   classDef source  fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
-   classDef watch   fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#9a3412
-   classDef core    fill:#ede9fe,stroke:#8b5cf6,stroke-width:2px,color:#5b21b6
-   classDef stage   fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#164e63
-   classDef ai      fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
-   classDef write   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#9d174d
-   classDef journal fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
-   classDef notify  fill:#e0e7ff,stroke:#6366f1,stroke-width:2px,color:#3730a3
-   classDef tool    fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
+  classDef source  fill:#dbeafe,stroke:#2563eb,stroke-width:2px,color:#1e3a8a
+  classDef watch   fill:#ffedd5,stroke:#f97316,stroke-width:2px,color:#9a3412
+  classDef core    fill:#ede9fe,stroke:#8b5cf6,stroke-width:2px,color:#5b21b6
+  classDef stage   fill:#ecfeff,stroke:#0891b2,stroke-width:2px,color:#164e63
+  classDef ai      fill:#dcfce7,stroke:#16a34a,stroke-width:2px,color:#14532d
+  classDef write   fill:#fce7f3,stroke:#db2777,stroke-width:2px,color:#9d174d
+  classDef journal fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
+  classDef notify  fill:#e0e7ff,stroke:#6366f1,stroke-width:2px,color:#3730a3
+  classDef tool    fill:#fef3c7,stroke:#f59e0b,stroke-width:2px,color:#92400e
 ```
 
 ## Data flow
