@@ -9,6 +9,7 @@ __pycache__/
 # local config + runtime
 config.jsonc
 compose.yml
+.env
 data/
 
 # Claude /triage memory (local-only learnings)
