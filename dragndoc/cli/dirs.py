@@ -49,3 +49,21 @@ def dir_ls(
     rows = list_dirs(parent)
     for row in rows:
         typer.echo(json.dumps(row.to_dict(), ensure_ascii=False, default=str))
+
+
+@dir_app.command("classify")
+def dir_classify(
+    path: Annotated[Path, typer.Argument(help="Directory to classify (calls Ollama).")],
+) -> None:
+    """Classify a directory via LLM and enqueue a proposal for `dnd review proposals`."""
+    from dragndoc import dir_classifier
+
+    if not path.exists() or not path.is_dir():
+        typer.echo(f"Not a directory: {path}", err=True)
+        raise typer.Exit(1)
+    proposal_id = dir_classifier.enqueue_for(path)
+    if proposal_id:
+        typer.echo(f"Enqueued dir_mode proposal #{proposal_id} for {path}")
+    else:
+        typer.echo(f"Failed to enqueue proposal for {path}", err=True)
+        raise typer.Exit(1)

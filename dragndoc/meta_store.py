@@ -104,6 +104,119 @@ class OcrInfo:
 
 
 @dataclass
+class AsrInfo:
+    """One row in ``asr`` — transcript provenance (parallel to :class:`OcrInfo`)."""
+
+    decision: str = ""
+    done: str | None = None
+    engine: str | None = None
+    engine_ver: str | None = None
+    model: str | None = None
+    langs: list[str] = field(default_factory=list)
+    detected_lang: str | None = None
+    duration_ms: int | None = None
+    audio_seconds: float | None = None
+    # phase 2 extensions
+    diarized: bool = False
+    channels: int | None = None
+    speakers: list[str] = field(default_factory=list)
+    srt_path: str | None = None        # relative to docs root (sidecar)
+    json_path: str | None = None       # relative to data/ (twin)
+    lang_prob: float | None = None
+    # phase 4 — committed-truth recording type (proposals live separately)
+    recording_type: str = "unknown"
+
+    def is_unset(self) -> bool:
+        return not self.decision and not self.done and not self.engine
+
+    def to_row(self) -> dict[str, Any]:
+        return {
+            "decision": self.decision,
+            "done": self.done,
+            "engine": self.engine,
+            "engine_ver": self.engine_ver,
+            "model": self.model,
+            "langs": to_semilist(self.langs),
+            "detected_lang": self.detected_lang,
+            "duration_ms": self.duration_ms,
+            "audio_seconds": self.audio_seconds,
+            "diarized": 1 if self.diarized else 0,
+            "channels": self.channels,
+            "speakers": to_semilist(self.speakers),
+            "srt_path": self.srt_path,
+            "json_path": self.json_path,
+            "lang_prob": self.lang_prob,
+            "recording_type": self.recording_type or "unknown",
+        }
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decision": self.decision,
+            "done": self.done,
+            "engine": self.engine,
+            "engine_ver": self.engine_ver,
+            "model": self.model,
+            "langs": list(self.langs),
+            "detected_lang": self.detected_lang,
+            "duration_ms": self.duration_ms,
+            "audio_seconds": self.audio_seconds,
+            "diarized": self.diarized,
+            "channels": self.channels,
+            "speakers": list(self.speakers),
+            "srt_path": self.srt_path,
+            "json_path": self.json_path,
+            "lang_prob": self.lang_prob,
+            "recording_type": self.recording_type,
+        }
+
+    @classmethod
+    def for_whisper_run(
+        cls,
+        decision_action: str,
+        *,
+        detected_lang: str | None = None,
+        duration_ms: int | None = None,
+        audio_seconds: float | None = None,
+    ) -> "AsrInfo":
+        """Stamp a completed Whisper run with engine, version, and the configured langs."""
+        from dragndoc.transcribe import engine_version
+
+        settings = get_settings()
+        return cls(
+            decision=decision_action,
+            done=utc_now_iso(),
+            engine="faster-whisper",
+            engine_ver=engine_version(),
+            model=settings.asr.model,
+            langs=[s.strip() for s in settings.asr.langs.replace("+", ",").split(",") if s.strip()],
+            detected_lang=detected_lang,
+            duration_ms=duration_ms,
+            audio_seconds=audio_seconds,
+        )
+
+    @classmethod
+    def for_subtitle_extract(
+        cls,
+        *,
+        langs: list[str],
+        detected_lang: str | None = None,
+        audio_seconds: float | None = None,
+        ffmpeg_ver: str | None = None,
+    ) -> "AsrInfo":
+        """Stamp a transcript pulled straight from an embedded subtitle track."""
+        return cls(
+            decision="asr_subtitle",
+            done=utc_now_iso(),
+            engine="subtitle",
+            engine_ver=ffmpeg_ver or "ffmpeg",
+            model=None,
+            langs=list(langs),
+            detected_lang=detected_lang,
+            audio_seconds=audio_seconds,
+        )
+
+
+@dataclass
 class Doc:
     """One row in ``docs`` plus the matching row (if any) in ``ocr``."""
 
@@ -125,6 +238,7 @@ class Doc:
     notes: str = ""
     extra: dict[str, Any] = field(default_factory=dict)
     ocr: OcrInfo = field(default_factory=OcrInfo)
+    asr: AsrInfo = field(default_factory=AsrInfo)
 
     # populated when read from db
     id: int | None = None
@@ -171,6 +285,7 @@ class Doc:
             "notes": self.notes,
             "extra": dict(self.extra),
             "ocr": self.ocr.to_dict(),
+            "asr": self.asr.to_dict(),
         }
         if include_duplicates and self.hash:
             unapproved, approved = _duplicate_lists_for(self)
@@ -219,6 +334,25 @@ def _row_to_doc(row: sqlite3.Row) -> Doc:
             engine=row["ocr_engine"],
             engine_ver=row["ocr_engine_ver"],
             langs=from_semilist(row["ocr_langs"]),
+        )
+    if "asr_decision" in keys and row["asr_decision"] is not None:
+        doc.asr = AsrInfo(
+            decision=row["asr_decision"] or "",
+            done=row["asr_done"],
+            engine=row["asr_engine"],
+            engine_ver=row["asr_engine_ver"],
+            model=row["asr_model"] if "asr_model" in keys else None,
+            langs=from_semilist(row["asr_langs"]),
+            detected_lang=row["asr_detected_lang"] if "asr_detected_lang" in keys else None,
+            duration_ms=row["asr_duration_ms"] if "asr_duration_ms" in keys else None,
+            audio_seconds=row["asr_audio_seconds"] if "asr_audio_seconds" in keys else None,
+            diarized=bool(row["asr_diarized"]) if "asr_diarized" in keys and row["asr_diarized"] is not None else False,
+            channels=row["asr_channels"] if "asr_channels" in keys else None,
+            speakers=from_semilist(row["asr_speakers"]) if "asr_speakers" in keys else [],
+            srt_path=row["asr_srt_path"] if "asr_srt_path" in keys else None,
+            json_path=row["asr_json_path"] if "asr_json_path" in keys else None,
+            lang_prob=row["asr_lang_prob"] if "asr_lang_prob" in keys else None,
+            recording_type=(row["asr_recording_type"] if "asr_recording_type" in keys and row["asr_recording_type"] else "unknown"),
         )
     return doc
 
@@ -276,7 +410,7 @@ def all_docs() -> list[Doc]:
 
 
 def upsert(doc: Doc) -> int:
-    """Insert or update ``doc`` (keyed by ``path``); upsert OCR row too. Returns docs.id."""
+    """Insert or update ``doc`` (keyed by ``path``); upsert OCR + ASR rows too. Returns docs.id."""
     doc.path = normalize(doc.path)
     row = doc.to_row()
     with transaction() as conn:
@@ -291,6 +425,10 @@ def upsert(doc: Doc) -> int:
             ocr_row = doc.ocr.to_row()
             ocr_row["doc_id"] = doc_id
             conn.execute(_UPSERT_OCR_SQL, ocr_row)
+        if not doc.asr.is_unset():
+            asr_row = doc.asr.to_row()
+            asr_row["doc_id"] = doc_id
+            conn.execute(_UPSERT_ASR_SQL, asr_row)
     doc.id = doc_id
     return doc_id
 
@@ -482,6 +620,36 @@ ON CONFLICT(doc_id) DO UPDATE SET
     langs      = excluded.langs
 """
 
+_UPSERT_ASR_SQL = """
+INSERT INTO asr (
+    doc_id, decision, done, engine, engine_ver, model, langs,
+    detected_lang, duration_ms, audio_seconds,
+    diarized, channels, speakers, srt_path, json_path, lang_prob, recording_type
+)
+VALUES (
+    :doc_id, :decision, :done, :engine, :engine_ver, :model, :langs,
+    :detected_lang, :duration_ms, :audio_seconds,
+    :diarized, :channels, :speakers, :srt_path, :json_path, :lang_prob, :recording_type
+)
+ON CONFLICT(doc_id) DO UPDATE SET
+    decision       = excluded.decision,
+    done           = excluded.done,
+    engine         = excluded.engine,
+    engine_ver     = excluded.engine_ver,
+    model          = excluded.model,
+    langs          = excluded.langs,
+    detected_lang  = excluded.detected_lang,
+    duration_ms    = excluded.duration_ms,
+    audio_seconds  = excluded.audio_seconds,
+    diarized       = excluded.diarized,
+    channels       = excluded.channels,
+    speakers       = excluded.speakers,
+    srt_path       = excluded.srt_path,
+    json_path      = excluded.json_path,
+    lang_prob      = excluded.lang_prob,
+    recording_type = excluded.recording_type
+"""
+
 
 # ---------------------------------------------------------------------------
 # enrichmentresult → doc translation
@@ -522,6 +690,7 @@ def doc_from_enrichment(
     enrichment: dict[str, Any],
     file_hash: str,
     ocr_info: OcrInfo,
+    asr_info: AsrInfo | None = None,
     summary: str | None = None,
 ) -> Doc:
     """Build a fresh :class:`Doc` from enrichment + file metadata."""
@@ -551,6 +720,7 @@ def doc_from_enrichment(
         notes="",
         extra=extra,
         ocr=ocr_info,
+        asr=asr_info or AsrInfo(),
     )
 
 
@@ -589,16 +759,36 @@ def to_markdown(doc: Doc) -> str:
     }
     if not doc.ocr.is_unset():
         front["ocr"] = doc.ocr.to_dict()
+    if not doc.asr.is_unset():
+        front["asr"] = doc.asr.to_dict()
     if doc.extra:
         front["extra"] = doc.extra
 
     yaml_text = yaml.safe_dump(front, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    # surface the SRT sidecar path so a triage agent (Claude) knows there's a full
+    # transcript view available — the LLM summary in the Summary section is bounded,
+    # but the SRT carries the entire spoken content with timing and speakers
+    transcript_section = ""
+    asr = doc.asr
+    if asr and asr.srt_path:
+        transcript_section = (
+            "# Transcript\n\n"
+            f"Full transcript SRT (with timing + speaker labels): `{asr.srt_path}`\n\n"
+        )
+        if asr.recording_type and asr.recording_type != "unknown":
+            transcript_section += f"Recording type: `{asr.recording_type}`\n"
+        if asr.speakers:
+            transcript_section += f"Speakers: {', '.join(asr.speakers)}\n"
+        if asr.audio_seconds:
+            transcript_section += f"Duration: ~{int(asr.audio_seconds // 60)}m {int(asr.audio_seconds % 60)}s\n"
+        transcript_section += "\n"
     body = (
         "---\n"
         f"{yaml_text.rstrip()}\n"
         "---\n\n"
         "# Summary\n\n"
         f"{doc.summary or ''}\n\n"
+        f"{transcript_section}"
         "# Notes\n\n"
         f"{doc.notes or ''}\n"
     )
@@ -664,6 +854,21 @@ def doc_from_markdown(text: str, *, base: Doc | None = None) -> Doc:
             langs=_list(ocr_seed.get("langs")),
         )
 
+    asr_seed = front.get("asr")
+    asr = seed.asr
+    if isinstance(asr_seed, dict):
+        asr = AsrInfo(
+            decision=str(asr_seed.get("decision") or ""),
+            done=asr_seed.get("done"),
+            engine=asr_seed.get("engine"),
+            engine_ver=asr_seed.get("engine_ver"),
+            model=asr_seed.get("model"),
+            langs=_list(asr_seed.get("langs")),
+            detected_lang=asr_seed.get("detected_lang"),
+            duration_ms=asr_seed.get("duration_ms"),
+            audio_seconds=asr_seed.get("audio_seconds"),
+        )
+
     extra_seed = front.get("extra")
     extra = extra_seed if isinstance(extra_seed, dict) else dict(seed.extra)
 
@@ -690,4 +895,5 @@ def doc_from_markdown(text: str, *, base: Doc | None = None) -> Doc:
         notes=notes or seed.notes,
         extra=extra,
         ocr=ocr,
+        asr=asr,
     )

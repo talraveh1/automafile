@@ -54,12 +54,19 @@ dir_app = typer.Typer(
     context_settings=HELP_CONTEXT_SETTINGS,
     help="Inspect and override tracked directory modes.",
 )
+transcript_app = typer.Typer(
+    add_completion=False,
+    no_args_is_help=True,
+    context_settings=HELP_CONTEXT_SETTINGS,
+    help="Inspect transcripts produced by ASR (sidecar SRT + JSON twin).",
+)
 app.add_typer(watch_app, name="watch")
 app.add_typer(review_app, name="review")
 app.add_typer(meta_app, name="meta")
 app.add_typer(toaster_app, name="toaster")
 app.add_typer(triage_app, name="triage")
 app.add_typer(dir_app, name="dir")
+app.add_typer(transcript_app, name="transcript")
 
 
 @app.callback()
@@ -83,6 +90,7 @@ from dragndoc.cli import (  # noqa: E402, F401
     misc,
     review,
     toaster,
+    transcript,
     triage,
     watch,
 )

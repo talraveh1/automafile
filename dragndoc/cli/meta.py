@@ -44,23 +44,61 @@ def _freeze_identity(new_doc, base) -> None:
 
 @meta_app.command("get")
 def meta_get(
-    path: Annotated[Path, typer.Argument(help="File path. Looks up the row by relative path under the docs root.")],
+    paths: Annotated[list[Path], typer.Argument(help="One or more files, directories, or glob patterns. Looks up rows by relative path under the docs root.")],
+    recursive: Annotated[bool, typer.Option("-r", "--recursive", help="When an argument is a directory, walk its whole subtree.")] = False,
+    insensitive: Annotated[bool, typer.Option("-i", "--insensitive", help="Case-insensitive glob matching.")] = False,
 ) -> None:
-    """JSON dump of one row (was `inspect`)."""
-    doc = _require_doc(path)
-    payload = doc.to_dict()
-    typer.echo(json.dumps(payload, indent=2, ensure_ascii=False, default=str))
+    """JSON dump of one or more rows. Single match → single object; many → JSON array."""
+    from dragndoc.cli._path_args import expand_paths
+
+    expanded = expand_paths(paths, recursive=recursive, insensitive=insensitive)
+    if not expanded:
+        typer.echo(f"No matching files: {', '.join(str(p) for p in paths)}", err=True)
+        raise typer.Exit(1)
+
+    if len(expanded) == 1:
+        doc = _require_doc(expanded[0])
+        typer.echo(json.dumps(doc.to_dict(), indent=2, ensure_ascii=False, default=str))
+        return
+
+    from dragndoc.meta_store import get_by_file
+    out: list[dict] = []
+    for fp in expanded:
+        doc = get_by_file(fp)
+        if doc is None:
+            continue
+        out.append(doc.to_dict())
+    typer.echo(json.dumps(out, indent=2, ensure_ascii=False, default=str))
 
 
 @meta_app.command("cat")
 def meta_cat(
-    path: Annotated[Path, typer.Argument(help="File path. Renders the row as markdown + frontmatter.")],
+    paths: Annotated[list[Path], typer.Argument(help="One or more files, directories, or glob patterns.")],
+    recursive: Annotated[bool, typer.Option("-r", "--recursive", help="When an argument is a directory, walk its whole subtree.")] = False,
+    insensitive: Annotated[bool, typer.Option("-i", "--insensitive", help="Case-insensitive glob matching.")] = False,
 ) -> None:
-    """Markdown render of one row (frontmatter + Summary + Notes)."""
-    from dragndoc.meta_store import to_markdown
+    """Markdown render of one or more rows (frontmatter + Summary + Notes)."""
+    from dragndoc.cli._path_args import expand_paths
+    from dragndoc.meta_store import get_by_file, to_markdown
 
-    doc = _require_doc(path)
-    typer.echo(to_markdown(doc), nl=False)
+    expanded = expand_paths(paths, recursive=recursive, insensitive=insensitive)
+    if not expanded:
+        typer.echo(f"No matching files: {', '.join(str(p) for p in paths)}", err=True)
+        raise typer.Exit(1)
+
+    if len(expanded) == 1:
+        doc = _require_doc(expanded[0])
+        typer.echo(to_markdown(doc), nl=False)
+        return
+
+    for i, fp in enumerate(expanded):
+        doc = get_by_file(fp)
+        if doc is None:
+            continue
+        if i:
+            typer.echo("\n---\n")
+        typer.echo(f"## {fp}\n", nl=False)
+        typer.echo(to_markdown(doc), nl=False)
 
 
 @meta_app.command("set")

@@ -18,6 +18,7 @@ from dragndoc.extractors.base import (
 from dragndoc.log import get_logger
 from dragndoc.llm import enrich, EnrichmentResult
 from dragndoc.meta_store import (
+    AsrInfo,
     OcrInfo,
     doc_from_enrichment,
     file_modified_iso,
@@ -40,6 +41,7 @@ log = get_logger(__name__)
 class DigestResult:
     path: Path
     ocr_decision: str = "no_ocr"
+    asr_decision: str = "no_asr"
     llm_tier: str = "skipped"
     category: str = "Unknown"
     metadata_target: str = "unknown"
@@ -96,6 +98,10 @@ def _hints_for(doc: ExtractedDoc) -> dict:
     """Build the LLM context dict: filesystem facts + the file's own embedded
     metadata (PDF DocInfo+XMP, Office core/custom props, EXIF, HTML <meta>,
     EPUB Dublin Core). Each populated by the extractor.
+
+    Also surfaces ASR provenance (recording_type, speakers, language hints,
+    sidecar path) when present — this lets the LLM understand it's looking
+    at a transcript (vs a document) and tailor the summary/tags accordingly.
     """
     hints: dict = {
         "filename": doc.path.name,
@@ -105,6 +111,24 @@ def _hints_for(doc: ExtractedDoc) -> dict:
     }
     if doc.extracted_metadata:
         hints.update(doc.extracted_metadata)
+    # asr hints — only attached when the extractor produced an AsrInfo
+    asr_info = getattr(doc, "asr_info", None)
+    if asr_info is not None and not asr_info.is_unset():
+        if asr_info.recording_type and asr_info.recording_type != "unknown":
+            hints["asr_recording_type"] = asr_info.recording_type
+        if asr_info.detected_lang:
+            hints["asr_detected_language"] = asr_info.detected_lang
+        if asr_info.speakers:
+            hints["asr_speakers"] = list(asr_info.speakers)
+        if asr_info.diarized:
+            hints["asr_diarized"] = True
+        if asr_info.channels and asr_info.channels >= 2:
+            hints["asr_channels"] = asr_info.channels
+        # surface engine + duration so the LLM understands the transcript provenance
+        if asr_info.engine:
+            hints["asr_engine"] = asr_info.engine
+        if asr_info.audio_seconds:
+            hints["asr_audio_seconds"] = asr_info.audio_seconds
     return hints
 
 
@@ -125,10 +149,18 @@ def _check_digestible(path: Path, settings) -> None:
     if not path.exists() or not path.is_file():
         log.error("Cannot digest %s: missing_or_not_file", path)
         raise _DigestAbort("missing_or_not_file")
+    if path.suffix.lower() in _SIDECAR_EXTS:
+        # SRTs we generated alongside an audio/video file are derivative artifacts —
+        # never digest them as standalone documents (parent's asr row tracks them)
+        log.info("Skipping %s: recognized sidecar extension", path)
+        raise _DigestAbort("sidecar_skipped", metadata_target="skipped")
     if is_in_opaque_subtree(path, stop_at=settings.docs):
         # respect directory-level opt-outs before any extraction, OCR, or hashing work starts
         log.info("Skipping %s: ancestor directory is opaque", path)
         raise _DigestAbort("blocked_opaque_subtree", metadata_target="skipped")
+
+
+_SIDECAR_EXTS = {".srt"}
 
 
 def _extract_or_abort(path: Path) -> ExtractedDoc:
@@ -148,18 +180,42 @@ def _persist_and_enqueue(
     enrichment: EnrichmentResult,
     file_hash: str,
     ocr_info: OcrInfo,
+    asr_info: AsrInfo | None = None,
+    transcription=None,
 ) -> int:
     new_doc = doc_from_enrichment(
         path,
         enrichment=enrichment.as_dict(),
         file_hash=file_hash,
         ocr_info=ocr_info,
+        asr_info=asr_info,
         summary=enrichment.summary,
     )
     existing = get_by_file(path)
     if existing is not None:
         new_doc.dup = existing.dup
     doc_id = upsert(new_doc)
+
+    # write SRT sidecar + JSON twin if we have a TranscriptionResult
+    if transcription is not None and asr_info is not None:
+        try:
+            from dragndoc import asr_artifacts
+            from dragndoc.meta_store import relative_to_root
+            srt_path, json_path = asr_artifacts.save(
+                transcription, original=path, doc_id=doc_id,
+            )
+            if srt_path or json_path:
+                # re-stamp asr_info with the actual sidecar paths and re-upsert
+                if srt_path is not None:
+                    try:
+                        new_doc.asr.srt_path = relative_to_root(srt_path)
+                    except Exception:  # noqa: BLE001
+                        new_doc.asr.srt_path = str(srt_path)
+                if json_path is not None:
+                    new_doc.asr.json_path = str(json_path)
+                upsert(new_doc)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Sidecar write failed for %s: %s", path, exc)
 
     from dragndoc.triage import enqueue as triage_enqueue
 
@@ -169,6 +225,58 @@ def _persist_and_enqueue(
     except Exception as exc:  # noqa: BLE001
         log.warning("Triage enqueue failed for %s: %s", path, exc)
     return doc_id
+
+
+def _enqueue_classification_proposals(
+    path: Path,
+    *,
+    doc_id: int,
+    classification: dict | None,
+) -> None:
+    """Enqueue recording_type + speaker_name proposals from path/classifier signals.
+
+    Only fires when ``classification['committed'] is False`` — committed
+    truths (mutagen tags, channel counts, VAD non-speech) write straight
+    into ``asr.recording_type``. Speaker name proposals from path patterns
+    always queue because path evidence isn't infallible (someone else
+    might have used the owner's phone).
+    """
+    if classification is None:
+        return
+    from dragndoc.proposals import (
+        KIND_RECORDING_TYPE,
+        KIND_SPEAKER_NAME,
+        enqueue,
+        subject_for_doc,
+    )
+
+    subject = subject_for_doc(doc_id)
+
+    if not classification.get("committed") and classification.get("recording_type") not in (None, "unknown"):
+        enqueue(
+            subject=subject,
+            kind=KIND_RECORDING_TYPE,
+            value={"recording_type": classification["recording_type"]},
+            source=classification.get("source", "unknown"),
+            rationale=classification.get("rationale") or None,
+        )
+
+    speakers = classification.get("speakers") or {}
+    if speakers:
+        # one proposal per channel/speaker label — keeps reviews granular.
+        # supersede_existing=False because each (label, name) pair is distinct;
+        # the table can hold multiple pending speaker_name proposals per doc.
+        for label, name in speakers.items():
+            if not name:
+                continue
+            enqueue(
+                subject=subject,
+                kind=KIND_SPEAKER_NAME,
+                value={"label": label, "name": name},
+                source=classification.get("source", "path_pattern"),
+                rationale=classification.get("rationale") or None,
+                supersede_existing=False,
+            )
 
 
 def digest_file(
@@ -199,6 +307,13 @@ def digest_file(
             doc, ocr_info = _maybe_run_ocr(doc, decision)
             result.ocr_decision = ocr_info.decision
 
+        # audio + video extractors run ASR themselves and attach an AsrInfo;
+        # for everything else asr_info stays None and the column rows are skipped
+        asr_info: AsrInfo | None = getattr(doc, "asr_info", None)
+        if asr_info is None and getattr(doc, "asr_decision", "no_asr") != "no_asr":
+            asr_info = AsrInfo(decision=doc.asr_decision)
+        result.asr_decision = asr_info.decision if asr_info else doc.asr_decision
+
         log.debug("Enriching %s (%d chars)", path, len(doc.text or ""))
         enrichment = enrich(doc, _hints_for(doc))
         result.enrichment = enrichment
@@ -214,8 +329,23 @@ def digest_file(
             result.metadata_target = "dry_run"
         else:
             result.doc_id = _persist_and_enqueue(
-                path, enrichment=enrichment, file_hash=file_hash, ocr_info=ocr_info,
+                path,
+                enrichment=enrichment,
+                file_hash=file_hash,
+                ocr_info=ocr_info,
+                asr_info=asr_info,
+                transcription=getattr(doc, "transcription", None),
             )
+            # phase 4 — enqueue per-doc classification proposals (recording_type,
+            # speaker names from path patterns) for user review
+            try:
+                _enqueue_classification_proposals(
+                    path,
+                    doc_id=result.doc_id,
+                    classification=getattr(doc, "recording_type_classification", None),
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning("Proposal enqueue failed for %s: %s", path, exc)
             result.metadata_target = "db"
     except _DigestAbort as abort:
         result.error = abort.code
@@ -226,8 +356,8 @@ def digest_file(
 
     result.duration_ms = _elapsed_ms(started)
     log.info(
-        "Digested %s | ocr=%s tier=%s category=%s target=%s id=%s | %dms",
-        path, result.ocr_decision, result.llm_tier, result.category,
+        "Digested %s | ocr=%s asr=%s tier=%s category=%s target=%s id=%s | %dms",
+        path, result.ocr_decision, result.asr_decision, result.llm_tier, result.category,
         result.metadata_target, result.doc_id, result.duration_ms,
     )
     return result
@@ -236,8 +366,9 @@ def digest_file(
 def format_result_line(result: DigestResult) -> str:
     # watcher and CLI share this compact status line
     rel = result.path.name
+    asr_part = f" | asr={result.asr_decision}" if result.asr_decision != "no_asr" else ""
     return (
-        f"{rel} | ocr={result.ocr_decision} | tier={result.llm_tier} "
+        f"{rel} | ocr={result.ocr_decision}{asr_part} | tier={result.llm_tier} "
         f"| category={result.category} | target={result.metadata_target} "
         f"| {result.duration_ms}ms"
         + (f" | error={result.error}" if result.error else "")

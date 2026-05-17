@@ -21,19 +21,36 @@ from dragndoc.log import get_logger
 log = get_logger(__name__)
 
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "8"
 
 
 _DOCS_FULL_SQL = """
 CREATE VIEW IF NOT EXISTS docs_full AS
 SELECT d.*,
-       o.decision   AS ocr_decision,
-       o.done       AS ocr_done,
-       o.engine     AS ocr_engine,
-       o.engine_ver AS ocr_engine_ver,
-       o.langs      AS ocr_langs
+       o.decision      AS ocr_decision,
+       o.done          AS ocr_done,
+       o.engine        AS ocr_engine,
+       o.engine_ver    AS ocr_engine_ver,
+       o.langs         AS ocr_langs,
+       a.decision      AS asr_decision,
+       a.done          AS asr_done,
+       a.engine        AS asr_engine,
+       a.engine_ver    AS asr_engine_ver,
+       a.model         AS asr_model,
+       a.langs         AS asr_langs,
+       a.detected_lang AS asr_detected_lang,
+       a.duration_ms   AS asr_duration_ms,
+       a.audio_seconds AS asr_audio_seconds,
+       a.diarized      AS asr_diarized,
+       a.channels      AS asr_channels,
+       a.speakers      AS asr_speakers,
+       a.srt_path      AS asr_srt_path,
+       a.json_path     AS asr_json_path,
+       a.lang_prob     AS asr_lang_prob,
+       a.recording_type AS asr_recording_type
 FROM docs d
 LEFT JOIN ocr o ON o.doc_id = d.id
+LEFT JOIN asr a ON a.doc_id = d.id
 """
 
 
@@ -49,7 +66,7 @@ _DIRS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS dirs (
     path         TEXT PRIMARY KEY,
     mode         TEXT NOT NULL CHECK(mode IN ('collection','bundle','opaque','unknown')),
-    source       TEXT NOT NULL CHECK(source IN ('hardcoded','heuristic','user')),
+    source       TEXT NOT NULL,
     fingerprint  TEXT,
     listing_id   TEXT,
     summary      TEXT,
@@ -57,6 +74,23 @@ CREATE TABLE IF NOT EXISTS dirs (
     confidence   REAL CHECK(confidence IS NULL OR (confidence >= 0 AND confidence <= 1))
 );
 CREATE INDEX IF NOT EXISTS ix_dirs_path_prefix ON dirs(path);
+"""
+
+_PROPOSALS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS proposals (
+    id          INTEGER PRIMARY KEY,
+    subject     TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    value       TEXT NOT NULL,
+    source      TEXT NOT NULL,
+    rationale   TEXT,
+    created_at  TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','accepted','rejected','superseded'))
+);
+CREATE INDEX IF NOT EXISTS ix_proposals_subject ON proposals(subject);
+CREATE INDEX IF NOT EXISTS ix_proposals_status  ON proposals(status);
+CREATE INDEX IF NOT EXISTS ix_proposals_kind    ON proposals(kind);
 """
 
 _SCHEMA_SQL = """
@@ -97,6 +131,26 @@ CREATE TABLE IF NOT EXISTS ocr (
     langs       TEXT NOT NULL DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS asr (
+    doc_id         INTEGER PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
+    decision       TEXT NOT NULL,
+    done           TEXT,
+    engine         TEXT,
+    engine_ver     TEXT,
+    model          TEXT,
+    langs          TEXT NOT NULL DEFAULT '',
+    detected_lang  TEXT,
+    duration_ms    INTEGER,
+    audio_seconds  REAL,
+    diarized       INTEGER NOT NULL DEFAULT 0,
+    channels       INTEGER,
+    speakers       TEXT NOT NULL DEFAULT '',
+    srt_path       TEXT,
+    json_path      TEXT,
+    lang_prob      REAL,
+    recording_type TEXT NOT NULL DEFAULT 'unknown'
+);
+
 """ + _DOCS_FULL_SQL + """;
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
@@ -135,6 +189,8 @@ CREATE INDEX IF NOT EXISTS ix_events_id ON events(id);
 CREATE INDEX IF NOT EXISTS ix_triage_enqueued ON triage(enqueued_at);
 
 """ + _DIRS_TABLE_SQL + """
+
+""" + _PROPOSALS_TABLE_SQL + """
 
 CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
@@ -191,9 +247,116 @@ def _migrate_3_to_4(conn: sqlite3.Connection) -> None:
     conn.executescript(_DIRS_TABLE_SQL)
 
 
+def _migrate_4_to_5(conn: sqlite3.Connection) -> None:
+    # the fingerprint algorithm changed from name-only to (relative_path, size) tuples
+    conn.execute("UPDATE dirs SET fingerprint = NULL")
+
+
+def _migrate_5_to_6(conn: sqlite3.Connection) -> None:
+    # add the asr table for audio/video transcription provenance and rebuild
+    # docs_full to expose the new columns alongside ocr (v6 shape)
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS asr (
+            doc_id        INTEGER PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
+            decision      TEXT NOT NULL,
+            done          TEXT,
+            engine        TEXT,
+            engine_ver    TEXT,
+            model         TEXT,
+            langs         TEXT NOT NULL DEFAULT '',
+            detected_lang TEXT,
+            duration_ms   INTEGER,
+            audio_seconds REAL
+        )
+        """
+    )
+    # the v6 view shape (just the audio-transcription columns). v7 below will
+    # re-drop and recreate the view with the new columns folded in.
+    conn.execute("DROP VIEW IF EXISTS docs_full")
+    conn.execute(
+        """
+        CREATE VIEW IF NOT EXISTS docs_full AS
+        SELECT d.*,
+               o.decision      AS ocr_decision,
+               o.done          AS ocr_done,
+               o.engine        AS ocr_engine,
+               o.engine_ver    AS ocr_engine_ver,
+               o.langs         AS ocr_langs,
+               a.decision      AS asr_decision,
+               a.done          AS asr_done,
+               a.engine        AS asr_engine,
+               a.engine_ver    AS asr_engine_ver,
+               a.model         AS asr_model,
+               a.langs         AS asr_langs,
+               a.detected_lang AS asr_detected_lang,
+               a.duration_ms   AS asr_duration_ms,
+               a.audio_seconds AS asr_audio_seconds
+        FROM docs d
+        LEFT JOIN ocr o ON o.doc_id = d.id
+        LEFT JOIN asr a ON a.doc_id = d.id
+        """
+    )
+
+
+def _migrate_6_to_7(conn: sqlite3.Connection) -> None:
+    # phase 2c — channel-split, sidecars, recording_type
+    new_columns = [
+        ("diarized",       "INTEGER NOT NULL DEFAULT 0"),
+        ("channels",       "INTEGER"),
+        ("speakers",       "TEXT NOT NULL DEFAULT ''"),
+        ("srt_path",       "TEXT"),
+        ("json_path",      "TEXT"),
+        ("lang_prob",      "REAL"),
+        ("recording_type", "TEXT NOT NULL DEFAULT 'unknown'"),
+    ]
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(asr)").fetchall()}
+    for name, decl in new_columns:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE asr ADD COLUMN {name} {decl}")
+    conn.execute("DROP VIEW IF EXISTS docs_full")
+    conn.executescript(_DOCS_FULL_SQL + ";")
+
+
+def _migrate_7_to_8(conn: sqlite3.Connection) -> None:
+    """Add the proposals table and relax the dirs.source CHECK constraint.
+
+    The CHECK on ``dirs.source`` originally restricted to
+    ``('hardcoded','heuristic','user')``; phase 4 introduces ``'llm'`` and
+    ``'proposal'`` (committed via ``dnd review``). SQLite can't ALTER a
+    CHECK in place, so we rebuild the table.
+    """
+    # 1. proposals table — additive, no rebuild needed
+    conn.executescript(_PROPOSALS_TABLE_SQL)
+
+    # 2. rebuild dirs to drop the source CHECK constraint
+    conn.execute(
+        """
+        CREATE TABLE dirs_new (
+            path         TEXT PRIMARY KEY,
+            mode         TEXT NOT NULL CHECK(mode IN ('collection','bundle','opaque','unknown')),
+            source       TEXT NOT NULL,
+            fingerprint  TEXT,
+            listing_id   TEXT,
+            summary      TEXT,
+            decided_at   TEXT NOT NULL,
+            confidence   REAL CHECK(confidence IS NULL OR (confidence >= 0 AND confidence <= 1))
+        )
+        """
+    )
+    conn.execute("INSERT INTO dirs_new SELECT * FROM dirs")
+    conn.execute("DROP TABLE dirs")
+    conn.execute("ALTER TABLE dirs_new RENAME TO dirs")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_dirs_path_prefix ON dirs(path)")
+
+
 _MIGRATIONS = [
     ("1", "3", _migrate_1_to_3),
     ("3", "4", _migrate_3_to_4),
+    ("4", "5", _migrate_4_to_5),
+    ("5", "6", _migrate_5_to_6),
+    ("6", "7", _migrate_6_to_7),
+    ("7", "8", _migrate_7_to_8),
 ]
 
 
@@ -283,7 +446,10 @@ def connect(*, readonly: bool = False) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(str(target))
     conn.row_factory = sqlite3.Row
     try:
-        _apply_pragmas(conn)
+        # WAL/synchronous pragmas write to the DB header; bootstrap_schema
+        # already persisted journal_mode=WAL, so skip on readonly connections
+        if not readonly:
+            _apply_pragmas(conn)
         yield conn
     finally:
         conn.close()

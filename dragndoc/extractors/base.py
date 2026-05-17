@@ -27,6 +27,13 @@ class ExtractedDoc:
     ocr_used: bool = False
     ocr_decision: str = "no_ocr"
     ocr_pages: list[int] | None = None
+    # audio/video parallel to ocr_used / ocr_decision — set by audio.py / video.py.
+    # ``asr_info`` is the stamped AsrInfo (engine, version, detected lang) when the
+    # extractor itself ran the transcription. None means the pipeline derives an
+    # AsrInfo from the decision later (e.g. ``asr_unavailable``).
+    asr_used: bool = False
+    asr_decision: str = "no_asr"
+    asr_info: Any = None
     format: str = "unknown"
     error: str | None = None
     # pdf only: full per-page character counts from the text-layer pass for

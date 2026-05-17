@@ -40,3 +40,17 @@ def like_child_pattern(path: str) -> str:
     # escape LIKE wildcards; callers must use ESCAPE '\'
     escaped = path.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     return f"{escaped}/%"
+
+
+def asr_models_dir() -> Path:
+    """Return the directory where faster-whisper caches downloaded models.
+
+    Resolves ``settings.asr.model_dir`` relative to the repo root when not
+    absolute. Created on demand by the transcribe module.
+    """
+    from dragndoc.config import REPO_ROOT, get_settings
+    raw = get_settings().asr.model_dir or "data/asr-models"
+    candidate = Path(raw).expanduser()
+    if not candidate.is_absolute():
+        candidate = REPO_ROOT / candidate
+    return candidate.resolve()

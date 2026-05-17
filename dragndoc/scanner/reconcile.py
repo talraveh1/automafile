@@ -115,6 +115,12 @@ def resolve_path_conflict(
         # preserve the only OCR payload by reattaching it to the surviving doc row
         conn.execute("UPDATE ocr SET doc_id = ? WHERE doc_id = ?", (winner["id"], loser["id"]))
 
+    loser_asr = conn.execute("SELECT * FROM asr WHERE doc_id = ?", (loser["id"],)).fetchone()
+    winner_asr = conn.execute("SELECT 1 FROM asr WHERE doc_id = ?", (winner["id"],)).fetchone()
+    if loser_asr is not None and winner_asr is None:
+        # preserve the only ASR payload by reattaching it to the surviving doc row
+        conn.execute("UPDATE asr SET doc_id = ? WHERE doc_id = ?", (winner["id"], loser["id"]))
+
     conn.execute("DELETE FROM docs WHERE id = ?", (loser["id"],))
     conn.execute(
         "UPDATE docs SET path = ?, size = ?, modified = ?, category = ?, parties = ?, "

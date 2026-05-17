@@ -101,6 +101,54 @@ class TesseractSettings(BaseModel):
     model_config = {"frozen": True}
 
 
+class AsrSettings(BaseModel):
+    model: str = "ivrit-ai/whisper-large-v3-ct2"
+    model_dir: str = "data/asr-models"
+    device: str = "auto"
+    compute_type: str = "float16"
+    langs: str = "he,en"
+    beam_size: int = 5
+    vad_filter: bool = True
+
+    # phase 1 — language detection
+    language_detection_seconds: int = 30
+    language_detection_min_prob: float = 0.5
+
+    # phase 2 — channel split + sidecars
+    split_channels_when_multi: bool = True
+    save_srt: bool = True
+    save_json: bool = True
+    srt_utf8_bom: bool = True
+    transcripts_dir: str = "data/transcripts"
+
+    # phase 3 — diarized engine (opt-in)
+    engine: str = "simple"            # "simple" | "diarized"
+    diarize: bool = False
+    hf_token: str = ""
+    alignment_models: dict[str, str] = Field(default_factory=dict)
+    batch_size: int = 16
+
+    # phase 4 — owner identity, path patterns
+    owner_name: str = ""
+    owner_aliases: list[str] = Field(default_factory=list)
+    path_patterns: list[dict[str, Any]] = Field(default_factory=list)
+
+    # phase 4 — recording-type policy
+    transcribe_music: bool = True
+    save_srt_for_non_speech: bool = False
+
+    model_config = {"frozen": True, "protected_namespaces": ()}
+
+
+class DirsSettings(BaseModel):
+    """Phase 5 — folder intake classifier settings."""
+
+    classify_on_scan: bool = False
+    max_sample_filenames: int = 10
+    block_digest_until_classified: bool = False
+    model_config = {"frozen": True}
+
+
 class Settings(BaseModel):
     """Frozen runtime configuration."""
 
@@ -112,6 +160,8 @@ class Settings(BaseModel):
     ocr: OcrSettings = Field(default_factory=OcrSettings)
     ollama: OllamaSettings = Field(default_factory=OllamaSettings)
     tesseract: TesseractSettings = Field(default_factory=TesseractSettings)
+    asr: AsrSettings = Field(default_factory=AsrSettings)
+    dirs: DirsSettings = Field(default_factory=DirsSettings)
 
     data_dir: Path
     db_path: Path
@@ -156,6 +206,43 @@ _SECTIONS: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
     "tesseract": (
         TesseractSettings,
         {"langs": "heb+eng", "bin": "", "prefix": ""},
+    ),
+    "asr": (
+        AsrSettings,
+        {
+            "model": "ivrit-ai/whisper-large-v3-ct2",
+            "model_dir": "data/asr-models",
+            "device": "auto",
+            "compute_type": "float16",
+            "langs": "he,en",
+            "beam_size": 5,
+            "vad_filter": True,
+            "language_detection_seconds": 30,
+            "language_detection_min_prob": 0.5,
+            "split_channels_when_multi": True,
+            "save_srt": True,
+            "save_json": True,
+            "srt_utf8_bom": True,
+            "transcripts_dir": "data/transcripts",
+            "engine": "simple",
+            "diarize": False,
+            "hf_token": "",
+            "alignment_models": {},
+            "batch_size": 16,
+            "owner_name": "",
+            "owner_aliases": [],
+            "path_patterns": [],
+            "transcribe_music": True,
+            "save_srt_for_non_speech": False,
+        },
+    ),
+    "dirs": (
+        DirsSettings,
+        {
+            "classify_on_scan": False,
+            "max_sample_filenames": 10,
+            "block_digest_until_classified": False,
+        },
     ),
 }
 

@@ -36,12 +36,16 @@ from dragndoc.treewalk import iter_unblocked_files
 log = get_logger("dragndoc.scanner")
 
 
+AUDIO_EXT = {".amr", ".mp3", ".m4a", ".wav", ".ogg", ".opus", ".flac", ".aac"}
+VIDEO_EXT = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".wmv", ".flv", ".m4v"}
+# sidecars we produce ourselves — never treated as standalone digestible files
+SIDECAR_EXT = {".srt"}
 SUPPORTED_EXT = {
     ".pdf", ".docx", ".xlsx", ".pptx",
     ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp", ".heic", ".heif",
     ".html", ".htm", ".epub", ".txt", ".md", ".markdown", ".csv", ".log", ".json",
     ".xml", ".yaml", ".yml",
-}
+} | AUDIO_EXT | VIDEO_EXT
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".heic", ".heif", ".bmp", ".gif"}
 
 
@@ -64,14 +68,18 @@ class RenamePlan:
     file_hash: str
 
 
+_DOCS_FULL_COLUMNS = (
+    "id, path, hash, size, modified, digested, category, summary, tags, "
+    "title, notes, parties, langs, date, confidence, dup, extra, "
+    "ocr_decision, ocr_done, ocr_engine, ocr_engine_ver, ocr_langs, "
+    "asr_decision, asr_done, asr_engine, asr_engine_ver, asr_model, "
+    "asr_langs, asr_detected_lang, asr_duration_ms, asr_audio_seconds"
+)
+
+
 def _index_existing_rows() -> dict[str, sqlite3.Row]:
     with connect(readonly=True) as conn:
-        rows = conn.execute(
-            "SELECT id, path, hash, size, modified, digested, category, summary, tags, "
-            "title, notes, parties, langs, date, confidence, dup, extra, "
-            "ocr_decision, ocr_done, ocr_engine, ocr_engine_ver, ocr_langs "
-            "FROM docs_full"
-        ).fetchall()
+        rows = conn.execute(f"SELECT {_DOCS_FULL_COLUMNS} FROM docs_full").fetchall()
     return {row["path"]: row for row in rows}
 
 
@@ -103,7 +111,10 @@ def _normalize_langs(value: str) -> tuple[str, ...]:
     if not value:
         return ()
     parts: list[str] = []
-    for chunk in value.replace("+", ";").split(";"):
+    # accept ``+``, ``,``, or ``;`` as separators so tesseract-style and
+    # whisper-style lang strings normalize to the same set
+    normalized = value.replace("+", ";").replace(",", ";")
+    for chunk in normalized.split(";"):
         chunk = chunk.strip()
         if chunk:
             parts.append(chunk)
@@ -116,11 +127,40 @@ def _current_tesseract_version() -> str:
     return scanner_pkg.tesseract_version()
 
 
+def _current_asr_engine_ver() -> str:
+    """Return the asr engine_ver string the current settings would stamp."""
+    try:
+        from dragndoc.transcribe import engine_version
+
+        return engine_version()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _ocr_drift(row: sqlite3.Row, current_engine: str, current_langs: str) -> bool:
     prev_engine = row["ocr_engine_ver"] or ""
     prev_langs = row["ocr_langs"] or ""
     done = row["ocr_done"] or ""
     if not done:
+        return False
+    if not (prev_engine or prev_langs):
+        return False
+    return _normalize_langs(prev_langs) != _normalize_langs(current_langs) or prev_engine != current_engine
+
+
+def _asr_drift(row: sqlite3.Row, current_engine: str, current_langs: str) -> bool:
+    """ASR engine-version drift detection (parallel to :func:`_ocr_drift`)."""
+    keys = row.keys()
+    if "asr_engine_ver" not in keys:
+        return False
+    prev_engine = row["asr_engine_ver"] or ""
+    prev_langs = row["asr_langs"] or ""
+    done = row["asr_done"] or ""
+    asr_engine = row["asr_engine"] or ""
+    if not done:
+        return False
+    # transcripts pulled from baked-in subtitles never drift on whisper changes
+    if asr_engine == "subtitle":
         return False
     if not (prev_engine or prev_langs):
         return False
@@ -165,6 +205,11 @@ def _inventory(
             log.info("Scan: entering %s", current_directory)
         files_seen += 1
         ext = path.suffix.lower()
+        if ext in SIDECAR_EXT:
+            # SRTs we generated alongside an audio/video file are tracked via the
+            # parent's asr row; they shouldn't be inventoried as digestible files
+            skipped += 1
+            continue
         if ext not in SUPPORTED_EXT:
             skipped += 1
             continue
@@ -187,6 +232,11 @@ def _inventory(
             # new images have no text layer, so their first digest depends on OCR
             details["needs_ocr"] = True
             details["ocr_reason"] = "image_format"
+        elif ext in (AUDIO_EXT | VIDEO_EXT) and rel not in rows_by_path:
+            # audio + video have no text layer either; ASR (or embedded subs)
+            # is the only way to recover anything searchable from these
+            details["needs_asr"] = True
+            details["asr_reason"] = "audio_format" if ext in AUDIO_EXT else "video_format"
         try:
             st = path.stat()
         except OSError as exc:
@@ -329,12 +379,7 @@ def _rows_in_scope(rows_by_path: dict[str, sqlite3.Row], walk_prefix: str) -> di
 
 
 def _fetch_rows_by_path(conn: sqlite3.Connection | None = None) -> dict[str, sqlite3.Row]:
-    sql = (
-        "SELECT id, path, hash, size, modified, digested, category, summary, tags, "
-        "title, notes, parties, langs, date, confidence, dup, extra, "
-        "ocr_decision, ocr_done, ocr_engine, ocr_engine_ver, ocr_langs "
-        "FROM docs_full"
-    )
+    sql = f"SELECT {_DOCS_FULL_COLUMNS} FROM docs_full"
     if conn is not None:
         rows = conn.execute(sql).fetchall()
     else:
@@ -451,6 +496,8 @@ def _build_worklist(
     settings = get_settings()
     current_engine = _current_tesseract_version()
     current_langs = settings.tesseract.langs
+    current_asr_engine = _current_asr_engine_ver()
+    current_asr_langs = settings.asr.langs
     worklist = WorklistForDigest()
     for rel, facts in sorted(fs_facts.items()):
         row = rows_by_path.get(rel)
@@ -503,6 +550,20 @@ def _build_worklist(
                     previous_languages=row["ocr_langs"],
                     current_engine=current_engine,
                     current_languages=current_langs,
+                )
+            )
+        if _asr_drift(row, current_asr_engine, current_asr_langs):
+            # asr model or language hint changes can invalidate stored transcripts
+            worklist.asr_review.append(
+                _candidate_for(
+                    row,
+                    facts,
+                    file_hash,
+                    "asr_drift",
+                    previous_engine=row["asr_engine_ver"],
+                    previous_languages=row["asr_langs"],
+                    current_engine=current_asr_engine,
+                    current_languages=current_asr_langs,
                 )
             )
     return worklist
@@ -595,10 +656,10 @@ def run_scan(
     )
     log.info(
         "scan complete under %s: seen=%d skipped=%d new=%d changed=%d partial=%d "
-        "stale=%d ocr_review=%d missing=%d unprocessable=%d",
+        "stale=%d ocr_review=%d asr_review=%d missing=%d unprocessable=%d",
         walk_root, scan_report.files_seen, scan_report.skipped,
         len(worklist.new_files), len(worklist.changed_files), len(worklist.partial_metadata),
-        len(worklist.stale_metadata), len(worklist.ocr_review),
+        len(worklist.stale_metadata), len(worklist.ocr_review), len(worklist.asr_review),
         len(report.unresolved_orphans), len(worklist.unprocessable),
     )
     return scan_report

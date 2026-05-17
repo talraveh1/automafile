@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dragndoc.extractors import (
+    audio as audio_ext,
     docx as docx_ext,
     epub as epub_ext,
     html as html_ext,
@@ -13,6 +14,7 @@ from dragndoc.extractors import (
     pptx as pptx_ext,
     text as text_ext,
     unknown as unknown_ext,
+    video as video_ext,
     xlsx as xlsx_ext,
 )
 from dragndoc.extractors.base import CorruptDocumentError, ExtractedDoc, ExtractorError
@@ -51,6 +53,22 @@ EXT_MIME_MAP = {
     ".xml": "application/xml",
     ".yaml": "application/x-yaml",
     ".yml": "application/x-yaml",
+    ".amr": "audio/amr",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+    ".mp4": "video/mp4",
+    ".mkv": "video/x-matroska",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".webm": "video/webm",
+    ".wmv": "video/x-ms-wmv",
+    ".flv": "video/x-flv",
+    ".m4v": "video/mp4",
 }
 
 MIME_MAP = {
@@ -76,6 +94,23 @@ MIME_MAP = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": docx_ext,
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": xlsx_ext,
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": pptx_ext,
+    "audio/amr": audio_ext,
+    "audio/mpeg": audio_ext,
+    "audio/mp4": audio_ext,
+    "audio/wav": audio_ext,
+    "audio/x-wav": audio_ext,
+    "audio/ogg": audio_ext,
+    "audio/opus": audio_ext,
+    "audio/flac": audio_ext,
+    "audio/aac": audio_ext,
+    "audio/x-m4a": audio_ext,
+    "video/mp4": video_ext,
+    "video/x-matroska": video_ext,
+    "video/quicktime": video_ext,
+    "video/x-msvideo": video_ext,
+    "video/webm": video_ext,
+    "video/x-ms-wmv": video_ext,
+    "video/x-flv": video_ext,
 }
 EXT_MAP = {
     ext: MIME_MAP[mime]

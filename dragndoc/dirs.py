@@ -5,10 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+DIR_FINGERPRINT_CAP = 256
 
 from dragndoc.config import get_settings
 from dragndoc.db import connect, transaction
@@ -91,12 +95,39 @@ def mode_tag(mode: str) -> str:
     return MODE_TAGS.get(mode, "unk")
 
 
-def fingerprint_directory(path: Path) -> str | None:
+def fingerprint_directory(path: Path, *, cap: int = DIR_FINGERPRINT_CAP) -> str | None:
     try:
-        names = sorted((entry.name for entry in path.iterdir()), key=str.lower)
+        if not path.is_dir():
+            return None
     except OSError:
         return None
-    payload = json.dumps(names, ensure_ascii=False, separators=(",", ":"))
+    entries: list[tuple[str, int | None]] = []
+    queue: deque[Path] = deque([path])
+    while queue and len(entries) < cap:
+        current = queue.popleft()
+        try:
+            children = sorted(current.iterdir(), key=lambda p: p.name.lower())
+        except OSError:
+            continue
+        for child in children:
+            if len(entries) >= cap:
+                break
+            try:
+                is_dir = child.is_dir()
+            except OSError:
+                continue
+            rel = child.relative_to(path).as_posix()
+            if is_dir:
+                entries.append((rel, None))
+                if child.name not in OPAQUE_DIR_NAMES:
+                    queue.append(child)
+            else:
+                try:
+                    size = child.stat().st_size
+                except OSError:
+                    size = None
+                entries.append((rel, size))
+    payload = json.dumps(entries, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 

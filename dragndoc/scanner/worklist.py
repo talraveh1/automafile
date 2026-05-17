@@ -52,6 +52,7 @@ class WorklistForDigest:
     partial_metadata: list[DigestCandidate] = field(default_factory=list)
     stale_metadata: list[DigestCandidate] = field(default_factory=list)
     ocr_review: list[DigestCandidate] = field(default_factory=list)
+    asr_review: list[DigestCandidate] = field(default_factory=list)
     unprocessable: list[UnprocessableEntry] = field(default_factory=list)
 
     def iter_digest_candidates(self) -> Iterator[DigestCandidate]:
@@ -63,6 +64,7 @@ class WorklistForDigest:
             self.partial_metadata,
             self.stale_metadata,
             self.ocr_review,
+            self.asr_review,
         ):
             for candidate in bucket:
                 if candidate.rel in seen:
@@ -77,6 +79,7 @@ class WorklistForDigest:
             "partial_metadata": [item.to_dict() for item in self.partial_metadata],
             "stale_metadata": [item.to_dict() for item in self.stale_metadata],
             "ocr_review": [item.to_dict() for item in self.ocr_review],
+            "asr_review": [item.to_dict() for item in self.asr_review],
             "unprocessable": [item.to_dict() for item in self.unprocessable],
         }
 
@@ -161,6 +164,14 @@ class ScanReport:
         ]
 
     @property
+    def files_needing_asr(self) -> list[dict[str, Any]]:
+        return [
+            item.to_dict()
+            for item in self.worklist.new_files
+            if item.details.get("needs_asr")
+        ]
+
+    @property
     def files_with_partial_metadata(self) -> list[dict[str, Any]]:
         return [item.to_dict() for item in self.worklist.partial_metadata]
 
@@ -171,6 +182,10 @@ class ScanReport:
     @property
     def ocr_review_candidates(self) -> list[dict[str, Any]]:
         return [item.to_dict() for item in self.worklist.ocr_review]
+
+    @property
+    def asr_review_candidates(self) -> list[dict[str, Any]]:
+        return [item.to_dict() for item in self.worklist.asr_review]
 
     @property
     def missing_files(self) -> list[dict[str, Any]]:
@@ -192,9 +207,11 @@ class ScanReport:
             "reconciliation": self.reconciliation.to_dict(),
             "files_needing_metadata": self.files_needing_metadata,
             "files_needing_ocr": self.files_needing_ocr,
+            "files_needing_asr": self.files_needing_asr,
             "files_with_partial_metadata": self.files_with_partial_metadata,
             "files_with_stale_metadata": self.files_with_stale_metadata,
             "ocr_review_candidates": self.ocr_review_candidates,
+            "asr_review_candidates": self.asr_review_candidates,
             "missing_files": self.missing_files,
             "unprocessable_files": self.unprocessable_files,
         }

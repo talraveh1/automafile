@@ -9,9 +9,11 @@ flowchart LR
    subgraph extract ["<b>Extraction</b>"]
       direction TB
       dispatch["<b>Dispatch</b><br/><i>ext / MIME</i>"]:::stage
-      extractors["<b>Extractors</b><br/>pdf · docx<br/>xlsx · pptx<br/>image · html<br/>epub · text"]:::stage
+      extractors["<b>Extractors</b><br/>pdf · docx<br/>xlsx · pptx<br/>image · html<br/>epub · text<br/>audio · video"]:::stage
       ocr["<b>OCR</b><br/><i>run_ocr<br/>tesseract</i>"]:::stage
       ocr_decision["<b>PDF OCR<br/>Decision</b><br/><i>per-page chars</i>"]:::stage
+      asr["<b>ASR</b><br/><i>transcribe<br/>faster-whisper</i>"]:::stage
+      subs["<b>Subtitle<br/>Extract</b><br/><i>ffmpeg / ffprobe</i>"]:::stage
    end
 
    subgraph output ["<b>Output</b>"]
@@ -20,7 +22,7 @@ flowchart LR
       writers["<b>Meta Store</b><br/><i>upsert docs+ocr<br/>FTS5 mirror</i>"]:::write
    end
 
-   db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · events<br/>triage_queue · docs_fts</i>")]:::journal
+   db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · asr · events<br/>triage_queue · docs_fts</i>")]:::journal
    toaster["<b>Toaster</b><br/><i>host process<br/>polls events.id</i>"]:::notify
 
    cli["<b>CLI</b><br/><i>digest · scan · review<br/>meta get/cat/set/edit · grep<br/>mv · cp · rm · ls<br/>triage list/next/done</i>"]:::tool
@@ -29,6 +31,8 @@ flowchart LR
    inbox --> watcher --> pipeline
    pipeline --> dispatch --> extractors --> output
    pipeline --> ocr --> ocr_decision --> output
+   pipeline --> asr --> output
+   pipeline --> subs --> output
    llm --> writers
    writers -->|upsert| db
    writers -.->|enqueue| db
@@ -80,6 +84,7 @@ flowchart LR
 data/
 ├── dragndoc.db          # SQLite, WAL-mode, locally-backed-up
 ├── tessdata/            # Tesseract language packs
+├── asr-models/          # faster-whisper / CT2 model snapshots (downloaded on first use)
 ├── runtime/             # watch.pid, watch.disabled
 ├── logs/                # dragndoc.log
 └── toaster.cursor       # last-seen events.id (small int)
@@ -142,12 +147,18 @@ it).
 describing what `digest` would do:
 
 - `files_needing_ocr` — text-layer-less PDFs, images without a row.
+- `files_needing_asr` — audio and video files without a row; the
+  pipeline will prefer embedded subtitles for video and fall back to
+  Whisper ASR when no usable text subtitle track is present.
 - `files_needing_metadata` — supported types with no `docs` row.
 - `files_with_partial_metadata` — rows missing required fields.
 - `files_with_stale_metadata` — file mtime newer than the row's
   `modified` (the file's mtime captured at last digest).
 - `ocr_review_candidates` — rows whose `engine_ver` / `langs` differ
   from the current settings.
+- `asr_review_candidates` — rows whose ASR `engine_ver` / `langs`
+  differ from the current settings (subtitle-derived rows are
+  excluded since they have no Whisper provenance to drift on).
 - `missing_files` — `docs` rows whose `path` no longer resolves to a
   file on disk; `dnd review orphans` proposes hash-matched relinks.
 - `unprocessable_files` — encrypted PDFs, etc.
@@ -176,7 +187,13 @@ The pipeline is deployable two ways without code changes:
 `dragndoc.ocr._resolve_tesseract_bin` validates that any configured path
 actually exists before honoring it, so the host's `config.jsonc` (with a
 Windows path) does not break the Linux container — the resolver falls
-through to `shutil.which("tesseract")` instead.
+through to `shutil.which("tesseract")` instead. The same pattern applies to
+`dragndoc.transcribe._resolve_model_dir`, which ensures the asr-models
+cache directory is created on demand and never honored when invalid.
+
+ASR additionally requires `ffmpeg` (audio decode + video subtitle/audio
+extraction) and `ffprobe` (stream inspection); both ship in the Linux
+container image and `dnd doctor` reports their presence on the host.
 
 ## The DB is the only metadata store
 

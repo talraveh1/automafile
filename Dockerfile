@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Lightweight Linux image for the Drag'n'Doc pipeline.
 # Works under Docker Desktop, Podman Desktop, or any Compose-compatible runtime.
 
@@ -7,6 +8,7 @@ FROM python:3.12-slim
 #   tesseract-ocr + heb/eng — OCR engine and language packs
 #   poppler-utils           — pdf2image (PDF rasterization for OCR)
 #   libmagic1               — python-magic (MIME sniffing for unknown extensions)
+#   ffmpeg                  — audio decode + video subtitle/audio extraction for ASR
 #   git                     — for working with the bind-mounted workspace repo
 #   procps                  — ps/top/kill/pgrep for inspecting running processes
 RUN apt-get update \
@@ -16,6 +18,7 @@ RUN apt-get update \
         tesseract-ocr-heb \
         poppler-utils \
         libmagic1 \
+        ffmpeg \
         git \
         curl \
         ca-certificates \
@@ -44,12 +47,22 @@ WORKDIR /workspace
 
 # install Python deps into a workspace-local venv that will seed the named
 # volume mounted at /workspace/.venv on first container create.
+# The squigglelog dep is in a private GitHub repo; we authenticate via a
+# BuildKit secret holding a fine-grained PAT. The token is only visible
+# during this RUN — both the temp git config and the secret mount are gone
+# before the layer is committed.
 COPY pyproject.toml ./
 COPY dragndoc/__init__.py dragndoc/__init__.py
-RUN python -m venv /workspace/.venv \
+RUN --mount=type=secret,id=gh_token \
+    export GIT_CONFIG_GLOBAL=/tmp/gitconfig-build \
+    && git config --file "$GIT_CONFIG_GLOBAL" \
+        url."https://x-access-token:$(cat /run/secrets/gh_token)@github.com/".insteadOf \
+        "https://github.com/" \
+    && python -m venv /workspace/.venv \
     && mkdir -p build \
     && /workspace/.venv/bin/pip install --no-cache-dir --upgrade pip \
     && /workspace/.venv/bin/pip install --no-cache-dir -e .[dev] \
+    && rm -f "$GIT_CONFIG_GLOBAL" \
     && rm -rf dragndoc \
     && chown -R dragndoc:dragndoc /workspace/.venv
 
