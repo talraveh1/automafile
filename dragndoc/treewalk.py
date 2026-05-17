@@ -26,17 +26,48 @@ def directory_is_opaque(directory: Path) -> bool:
 
 
 def is_in_opaque_subtree(path: Path, *, stop_at: Path | None = None) -> bool:
+    return opaque_ancestor(path, stop_at=stop_at) is not None
+
+
+def opaque_ancestor(path: Path, *, stop_at: Path | None = None) -> Path | None:
+    """Return the closest opaque directory at or above ``path`` (up to ``stop_at``).
+
+    For files, the search starts at the parent directory; for directories, at the
+    directory itself. Returns ``None`` if no opaque ancestor exists before reaching
+    ``stop_at`` or the filesystem root.
+    """
     current = path if path.is_dir() else path.parent
     stop = stop_at.resolve() if stop_at is not None else None
 
     while True:
         if stop is not None and current.resolve() == stop:
-            return False
+            return None
         if directory_is_opaque(current):
-            return True
+            return current
         parent = current.parent
         if parent == current:
-            return False
+            return None
+        current = parent
+
+
+def topmost_opaque_ancestor(path: Path, *, stop_at: Path | None = None) -> Path | None:
+    """Return the *outermost* opaque directory at or above ``path``.
+
+    Walks all the way up to ``stop_at`` and returns the opaque directory closest
+    to ``stop_at`` (so nested opaque dirs collapse to a single "skip" announcement).
+    """
+    current = path if path.is_dir() else path.parent
+    stop = stop_at.resolve() if stop_at is not None else None
+    topmost: Path | None = None
+
+    while True:
+        if stop is not None and current.resolve() == stop:
+            return topmost
+        if directory_is_opaque(current):
+            topmost = current
+        parent = current.parent
+        if parent == current:
+            return topmost
         current = parent
 
 

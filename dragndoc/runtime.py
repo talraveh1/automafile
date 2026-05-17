@@ -36,6 +36,7 @@ class RuntimePaths:
     state_dir: Path
     disabled_file: Path
     pid_file: Path
+    heartbeat_file: Path
 
 
 def runtime_paths() -> RuntimePaths:
@@ -44,7 +45,34 @@ def runtime_paths() -> RuntimePaths:
         state_dir=state_dir,
         disabled_file=state_dir / "watch.disabled",
         pid_file=state_dir / "watch.pid",
+        heartbeat_file=state_dir / "watch.heartbeat",
     )
+
+
+# the watcher refreshes ``watch.heartbeat`` each tick; we treat anything
+# fresher than this as "running". A generous multiple of the 1 s tick
+# tolerates short pauses (e.g. a Docker desktop suspend) without flapping.
+HEARTBEAT_STALE_AFTER = 15.0
+
+
+def write_heartbeat(paths: RuntimePaths | None = None) -> None:
+    """Bump ``watch.heartbeat``'s mtime so cross-namespace observers can
+    confirm liveness without resolving a foreign PID."""
+    paths = paths or runtime_paths()
+    try:
+        _ensure_state_dir(paths)
+        paths.heartbeat_file.touch(exist_ok=True)
+        # touch() updates mtime even when the file already exists
+    except OSError:
+        pass
+
+
+def _heartbeat_fresh(paths: RuntimePaths) -> bool:
+    try:
+        mtime = paths.heartbeat_file.stat().st_mtime
+    except OSError:
+        return False
+    return (time.time() - mtime) <= HEARTBEAT_STALE_AFTER
 
 
 def _ensure_state_dir(paths: RuntimePaths) -> None:
@@ -90,7 +118,11 @@ def status_snapshot(paths: RuntimePaths | None = None) -> dict[str, object]:
     paths = paths or runtime_paths()
     disabled = paths.disabled_file.exists()
     pid = _read_pid(paths)
-    running = pid is not None and pid_alive(pid)
+    # liveness is decided by heartbeat freshness — pid_alive doesn't cross
+    # the container's PID namespace, so the host's toaster can't trust it.
+    # we still fall back to pid_alive on the off-chance the heartbeat file
+    # is missing (e.g. running an older watcher build for a moment).
+    running = _heartbeat_fresh(paths) or (pid is not None and pid_alive(pid))
     if running:
         state = "running"
     elif disabled:

@@ -44,6 +44,7 @@ def _paths(base: Path) -> RuntimePaths:
         state_dir=base,
         disabled_file=base / "watch.disabled",
         pid_file=base / "watch.pid",
+        heartbeat_file=base / "watch.heartbeat",
     )
 
 

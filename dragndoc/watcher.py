@@ -20,8 +20,8 @@ from dragndoc.events import (
 from dragndoc.log import get_logger
 from dragndoc.pipeline import digest_file, format_result_line
 from dragndoc.scanner import ContentChanged, NewFile, NoChange, Renamed, reconcile_single
-from dragndoc.meta_store import recompute_dups_for_hashes
-from dragndoc.treewalk import is_in_opaque_subtree
+from dragndoc.meta_store import delete_by_path, recompute_dups_for_hashes, relative_to_root
+from dragndoc.treewalk import opaque_ancestor, topmost_opaque_ancestor
 from dragndoc.triage import count as triage_count
 
 
@@ -34,29 +34,87 @@ class _InboxHandler(FileSystemEventHandler):
     def __init__(self) -> None:
         super().__init__()
         self._inflight: set[Path] = set()
+        self._announced_opaque: set[Path] = set()
         self._lock = Lock()
 
     def on_created(self, event):
+        path = Path(os.fsdecode(event.src_path))
+        self._log_top_level("Created", path)
         if event.is_directory:
+            self._announce_opaque_for(path)
             return
-        self._maybe_process(Path(os.fsdecode(event.src_path)))
+        self._maybe_process(path)
 
     def on_moved(self, event):
+        src = Path(os.fsdecode(event.src_path))
+        dest = Path(os.fsdecode(event.dest_path))
+        self._log_top_level("Moved", src, dest)
+        with self._lock:
+            self._announced_opaque.discard(src)
         if event.is_directory:
+            self._announce_opaque_for(dest)
             return
-        self._maybe_process(Path(os.fsdecode(event.dest_path)))
+        self._maybe_process(dest)
 
     def on_modified(self, event):
+        path = Path(os.fsdecode(event.src_path))
+        self._log_top_level("Modified", path)
         if event.is_directory:
             return
-        self._maybe_process(Path(os.fsdecode(event.src_path)))
+        self._maybe_process(path)
+
+    def on_deleted(self, event):
+        path = Path(os.fsdecode(event.src_path))
+        self._log_top_level("Deleted", path)
+        with self._lock:
+            self._announced_opaque.discard(path)
+        if event.is_directory:
+            return
+        self._handle_file_deletion(path)
+
+    @staticmethod
+    def _handle_file_deletion(path: Path) -> None:
+        """Drop the docs row when a file is physically removed.
+
+        ``dnd mv`` updates the row's path *before* the polling cycle observes the
+        old path missing, so by the time we get here the row is either already
+        gone (mv handled it) or genuinely orphaned. The triage row cascades via
+        the ON DELETE foreign key, which is what keeps "X files awaiting triage"
+        honest without a separate hook.
+        """
+        if opaque_ancestor(path, stop_at=get_settings().docs) is not None:
+            return
+        rel = relative_to_root(path)
+        if delete_by_path(rel):
+            log.info("Dropped metadata for deleted file: %s", path)
+
+    @staticmethod
+    def _log_top_level(action: str, src: Path, dest: Path | None = None) -> None:
+        inbox = get_settings().inbox_path
+        if src.parent != inbox and (dest is None or dest.parent != inbox):
+            return
+        if dest is not None:
+            log.info("%s: %s -> %s", action, src, dest)
+        else:
+            log.info("%s: %s", action, src)
+
+    def _announce_opaque_for(self, path: Path) -> None:
+        """Log the opaque-subtree skip once per outermost opaque subtree."""
+        opaque = topmost_opaque_ancestor(path, stop_at=get_settings().docs)
+        if opaque is None:
+            return
+        with self._lock:
+            if opaque in self._announced_opaque:
+                return
+            self._announced_opaque.add(opaque)
+        log.info("Skipping opaque subtree: %s", opaque)
 
     def _maybe_process(self, path: Path) -> None:
         settings = get_settings()
         if path.name.startswith("."):
             return
-        if is_in_opaque_subtree(path, stop_at=settings.docs):
-            log.info("Skipping new file under opaque subtree: %s", path)
+        if opaque_ancestor(path, stop_at=settings.docs) is not None:
+            self._announce_opaque_for(path)
             return
         if path.suffix.lower() in {".tmp", ".part", ".crdownload"}:
             return
@@ -141,11 +199,53 @@ class _InboxHandler(FileSystemEventHandler):
             time.sleep(0.5)
 
 
+def _reconcile_inbox_orphans() -> int:
+    """Drop bogus docs rows under the inbox so the "awaiting triage" count is honest.
+
+    Two kinds of rows get cleared on startup so they don't keep inflating the
+    queue across watcher restarts:
+
+    - files that vanished from disk while the watcher was offline
+    - files that live inside an opaque subtree (e.g. an unpacked ``.venv``);
+      these should never have been digested but may linger from earlier runs
+      that pre-date the opaque-skipping logic
+
+    Triage rows cascade via the docs FK.
+    """
+    from dragndoc.db import transaction
+
+    settings = get_settings()
+    inbox_prefix = settings.inbox.rstrip("/") + "/"
+    docs_root = settings.docs
+    with transaction() as conn:
+        rows = conn.execute(
+            "SELECT id, path FROM docs WHERE path LIKE ?",
+            (f"{inbox_prefix}%",),
+        ).fetchall()
+        drop_ids: list[int] = []
+        for row in rows:
+            full = docs_root / row["path"]
+            if not full.exists():
+                drop_ids.append(row["id"])
+                continue
+            if opaque_ancestor(full, stop_at=docs_root) is not None:
+                drop_ids.append(row["id"])
+        if not drop_ids:
+            return 0
+        placeholders = ",".join("?" * len(drop_ids))
+        conn.execute(f"DELETE FROM docs WHERE id IN ({placeholders})", drop_ids)
+    return len(drop_ids)
+
+
 def run_watcher() -> None:
     """Foreground loop. Press Ctrl-C to stop."""
     settings = get_settings()
     settings.inbox_path.mkdir(parents=True, exist_ok=True)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
+
+    removed = _reconcile_inbox_orphans()
+    if removed:
+        log.info("Startup reconciliation: dropped %d orphan inbox row(s)", removed)
 
     handler = _InboxHandler()
     observer = PollingObserver(timeout=settings.watch.polling)
@@ -153,8 +253,13 @@ def run_watcher() -> None:
     observer.start()
     log.info("Watching %s (polling every %.1fs)", settings.inbox_path, settings.watch.polling)
     print(f"[dragndoc] Watching {settings.inbox_path}; Ctrl-C to stop.")
+    from dragndoc.runtime import write_heartbeat
+
     try:
         while True:
+            # heartbeat lets the host toaster see the container watcher is alive
+            # without trying to resolve its (container-namespace) PID
+            write_heartbeat()
             time.sleep(1)
     except KeyboardInterrupt:
         log.info("Watcher stopped by user.")
