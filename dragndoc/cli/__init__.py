@@ -88,6 +88,7 @@ from dragndoc.cli import (  # noqa: E402, F401
     grep,
     meta,
     misc,
+    mux,
     review,
     toaster,
     transcript,

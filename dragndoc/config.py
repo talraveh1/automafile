@@ -149,6 +149,38 @@ class DirsSettings(BaseModel):
     model_config = {"frozen": True}
 
 
+class MuxSettings(BaseModel):
+    """`dnd mux` settings — remux audio + transcript into a player-friendly MKV."""
+
+    # threshold separating telephone narrowband from wideband / studio audio;
+    # < threshold uses Opus VOIP application, ≥ uses generic audio
+    narrowband_sample_rate_threshold: int = 16000
+
+    # Opus bitrates by source bandwidth and channel count (libopus is
+    # transparent on speech well below these)
+    narrowband_mono_bitrate: str = "24k"
+    narrowband_stereo_bitrate: str = "48k"
+    wideband_mono_bitrate: str = "64k"
+    wideband_stereo_bitrate: str = "96k"
+
+    # MPC-HC's subtitle UI only lights up when the container has a video
+    # stream — we mux a 1 fps 2×2 black H.264 dummy track (≈ 1 KB overhead)
+    dummy_video_size: int = 2
+    dummy_video_fps: int = 1
+
+    # default language tag when none can be inferred from the asr row
+    default_language: str = "und"
+
+    # keep the source audio after a successful mux (default: replace it)
+    keep_original: bool = False
+
+    # `--compression 0:none` on the subtitle stream — zlib content-compression
+    # is the Matroska default and some hardware players still mishandle it
+    sub_compression_none: bool = True
+
+    model_config = {"frozen": True}
+
+
 class Settings(BaseModel):
     """Frozen runtime configuration."""
 
@@ -162,6 +194,7 @@ class Settings(BaseModel):
     tesseract: TesseractSettings = Field(default_factory=TesseractSettings)
     asr: AsrSettings = Field(default_factory=AsrSettings)
     dirs: DirsSettings = Field(default_factory=DirsSettings)
+    mux: MuxSettings = Field(default_factory=MuxSettings)
 
     data_dir: Path
     db_path: Path
@@ -242,6 +275,21 @@ _SECTIONS: dict[str, tuple[type[BaseModel], dict[str, Any]]] = {
             "classify_on_scan": False,
             "max_sample_filenames": 10,
             "block_digest_until_classified": False,
+        },
+    ),
+    "mux": (
+        MuxSettings,
+        {
+            "narrowband_sample_rate_threshold": 16000,
+            "narrowband_mono_bitrate": "24k",
+            "narrowband_stereo_bitrate": "48k",
+            "wideband_mono_bitrate": "64k",
+            "wideband_stereo_bitrate": "96k",
+            "dummy_video_size": 2,
+            "dummy_video_fps": 1,
+            "default_language": "und",
+            "keep_original": False,
+            "sub_compression_none": True,
         },
     ),
 }

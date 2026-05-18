@@ -29,6 +29,7 @@ def doctor() -> None:
     log.info("CLI: doctor")
     from dragndoc.config import get_settings
     from dragndoc.llm import ollama_available, ollama_has_model
+    from dragndoc.mux import mkvmerge_available, mkvmerge_version
     from dragndoc.ocr import tesseract_available, tesseract_languages, tesseract_version
     from dragndoc.transcribe import (
         ffmpeg_available,
@@ -51,6 +52,10 @@ def doctor() -> None:
 
     typer.echo(f"ffmpeg present : {ffmpeg_available()}")
     typer.echo(f"ffprobe present: {ffprobe_available()}")
+    mkv = mkvmerge_available()
+    typer.echo(f"mkvmerge present: {mkv}")
+    if mkv:
+        typer.echo(f"  version: {mkvmerge_version()}")
     whisper = whisper_available()
     typer.echo(f"Whisper present: {whisper}")
     if whisper:

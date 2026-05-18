@@ -26,7 +26,7 @@ flowchart LR
   db[("<b>data/dragndoc.db</b><br/><i>docs · ocr · asr · events<br/>triage_queue · docs_fts</i>")]:::journal
   toaster["<b>Toaster</b><br/><i>host process<br/>polls events.id</i>"]:::notify
 
-  cli["<b>CLI</b><br/><i>digest · scan · review<br/>meta get/cat/set/edit<br/>grep · mv · cp · rm · ls<br/>triage list/next/done</i>"]:::tool
+  cli["<b>CLI</b><br/><i>digest · scan · review<br/>meta get/cat/set/edit<br/>grep · mv · cp · rm · ls<br/>triage list/next/done<br/>mux (Opus + mkvmerge)</i>"]:::tool
   triage(["🗂️ Triage skill"]):::source
 
   inbox --> watcher --> pipeline
